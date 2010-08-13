@@ -22,15 +22,24 @@ include $(CLEAR_VARS)
 LOCAL_SRC_FILES:= ril.c
 
 LOCAL_C_INCLUDES := \
-	$(LOCAL_PATH)/../dbus \
+	$(LOCAL_PATH)/.. \
 	$(KERNEL_HEADERS) \
 	$(call include-path-for, glib) \
-	$(call include-path-for, dbus)
+	$(call include-path-for, dbus) \
+	external/glib/glib \
+	external/glib \
+	external/glib/android \
 ##
 
-LOCAL_SHARED_LIBRARIES := libcutils libglib-2.0 libril
+LOCAL_SHARED_LIBRARIES := \
+	libcutils \
+	libglib-2.0 \
+	libril \
+	libdbus \
+	libgobject-2.0
+##
 
-LOCAL_STATIC_LIBRARIES := libgdbus_glib
+LOCAL_STATIC_LIBRARIES := libdbus_glib
 
 LOCAL_CFLAGS := -DRIL_SHLIB -DHAVE_CONFIG_H
 

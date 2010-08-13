@@ -26,6 +26,6 @@ LOCAL_C_INCLUDES:= \
 	external/glib/android \
 ##
 
-LOCAL_MODULE:=libgdbus_glib
+LOCAL_MODULE:=libdbus_glib
 
 include $(BUILD_STATIC_LIBRARY)

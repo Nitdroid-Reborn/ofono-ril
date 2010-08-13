@@ -33,6 +33,11 @@
 #include <glib/gi18n.h>
 #include <gobject/gvaluecollector.h>
 
+#if defined _
+#undef _
+#endif
+#define _(str) ( str )
+
 #define DBUS_G_PROXY_CALL_TO_ID(x) (GPOINTER_TO_UINT(x))
 #define DBUS_G_PROXY_ID_TO_CALL(x) (GUINT_TO_POINTER(x))
 #define DBUS_G_PROXY_GET_PRIVATE(o)  \

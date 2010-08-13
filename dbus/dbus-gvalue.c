@@ -34,6 +34,11 @@
 #include <glib.h>
 #include <glib/gi18n.h>
 
+#if defined _
+#undef _
+#endif
+#define _(str) ( str )
+
 /* Seems reasonable, but this should probably be part of the standard protocol */
 #define DBUS_GLIB_MAX_VARIANT_RECURSION 32
 

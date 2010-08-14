@@ -19,7 +19,7 @@
 LOCAL_PATH:= $(call my-dir)
 include $(CLEAR_VARS)
 
-LOCAL_SRC_FILES:= ril.c
+LOCAL_SRC_FILES:= ril.c marshaller.c
 
 LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/.. \
@@ -36,7 +36,8 @@ LOCAL_SHARED_LIBRARIES := \
 	libglib-2.0 \
 	libril \
 	libdbus \
-	libgobject-2.0
+	libgobject-2.0 \
+	libgthread-2.0
 ##
 
 LOCAL_STATIC_LIBRARIES := libdbus_glib

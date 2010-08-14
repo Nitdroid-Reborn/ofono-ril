@@ -37,8 +37,10 @@
 #define LOG_TAG "RIL"
 #include <utils/Log.h>
 
-//#include <dbus-glib.h>
-#include <glib.h>
+#include <glib/gthread.h>
+#include <dbus/dbus-glib.h>
+
+#include "marshaller.h"
 
 typedef enum {
     SIM_ABSENT = 0,
@@ -72,7 +74,11 @@ static const RIL_RadioFunctions s_callbacks = {
     getVersion
 };
 
-//static DBusConnection *connection = 0;
+const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
+
+static GMainLoop *loop;
+static DBusGConnection *connection;
+DBusGProxy *manager, *modem;
 
 #ifdef RIL_SHLIB
 static const struct RIL_Env *s_rilenv;
@@ -1580,13 +1586,96 @@ mainLoop(void *param)
     // we don't presently have a cancellation mechanism
     sleep(1);
 
-
-    GMainLoop *event_loop = g_main_loop_new(NULL, FALSE);
-    g_main_loop_run(event_loop);
+    //GMainLoop *event_loop = g_main_loop_new(NULL, FALSE);
+    LOGD("Running main loop");
+    g_main_loop_run(loop);
+    LOGD("Main loop ended");
 
     //waitForClose();
     //LOGI("Re-opening after close");
 
+    return 0;
+}
+
+static int setProperty(DBusGProxy *proxy, const gchar *property, GValue *value)
+{
+    return 0;
+}
+
+static void voicecall_property_changed(DBusGProxy *proxy, const gchar *property,
+                                   GValue *value, gpointer user_data)
+{
+    // XXX
+    LOGE("voicecall_property_changed: %s->%s", property, g_strdup_value_contents(value));
+    //if (g_strcmp0(property, OFONO_PROPERTY_INTERFACES) == 0)
+    //update_interfaces(self, value);
+
+    g_value_unset(value);
+}
+
+static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
+                                   GValue *value, gpointer user_data)
+{
+    // XXX
+    LOGE("modem_property_changed: %s->%s", property, g_strdup_value_contents(value));
+    //if (g_strcmp0(property, OFONO_PROPERTY_INTERFACES) == 0)
+    //update_interfaces(self, value);
+
+    g_value_unset(value);
+}
+
+static int initOfono()
+{
+    GError *error = NULL;
+    connection = dbus_g_bus_get(DBUS_BUS_SYSTEM, &error);
+    if (!connection) {
+        LOGE("Failed to open connection to bus: %s\n", error->message);
+        g_error_free (error);
+        return 0;
+    }
+    LOGW("dbus connect - ok");
+
+    error = NULL;
+    manager = dbus_g_proxy_new_for_name(connection, "org.ofono", "/", "org.ofono.Manager");
+    if (!manager) {
+        LOGE("Failed to create Manager proxy object: %s", error->message);
+        return 0;
+    }
+    LOGW("proxy manager - ok");
+
+    error = NULL;
+    GHashTable *dict;
+    if (!dbus_g_proxy_call(manager, "GetProperties", &error, G_TYPE_INVALID,
+                           dbus_g_type_get_map("GHashTable", G_TYPE_STRING, G_TYPE_VALUE), &dict,
+                           G_TYPE_INVALID))
+    {
+        LOGE("Manager.GetProperties failed: %s", error->message);
+        return 0;
+    }
+
+    GValue *value = (GValue *) g_hash_table_lookup(dict, "Modems");
+    GPtrArray *modemArr = g_value_peek_pointer(value);
+
+    const char *modemName = g_ptr_array_index(modemArr, 0);
+    LOGD("ofono modem:%s\n", modemName);
+    if (strstr("isimodem", modemName) != 0) {
+        LOGE("Modem name dosn't match: %s, but we expect \"isimodem\"", modemName);
+    }
+
+    error = NULL;
+    modem = dbus_g_proxy_new_for_name(connection, "org.ofono", "/isimodem", "org.ofono.Modem");
+    if (!modem) {
+        LOGE("Failed to create Modem proxy object: %s", error->message);
+        return 0;
+    }
+    dbus_g_proxy_add_signal(modem, OFONO_SIGNAL_PROPERTY_CHANGED, G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+    dbus_g_proxy_connect_signal(modem,
+                                OFONO_SIGNAL_PROPERTY_CHANGED,
+                                G_CALLBACK(modem_property_changed), modem, NULL);
+    
+    LOGW("modem proxy - ok");
+
+    LOGW("Ofono initialization - ok");
     return 0;
 }
 
@@ -1603,10 +1692,35 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 
     s_rilenv = env;
 
+    if (!g_thread_supported ())
+	{
+        g_thread_init(NULL);
+        dbus_g_thread_init();
+    }
+    g_type_init();
+
+    dbus_g_object_register_marshaller(g_cclosure_user_marshal_VOID__STRING_BOXED,
+                                      G_TYPE_NONE,
+                                      G_TYPE_STRING,
+                                      G_TYPE_VALUE,
+                                      G_TYPE_INVALID);
+
+    loop = g_main_loop_new (NULL, FALSE);
+
+    if (initOfono())
+        return 0;
+
+#if 1
+    LOGD("Running main loop");
+    g_main_loop_run(loop);
+#endif
+
 
     pthread_attr_init (&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     ret = pthread_create(&s_tid_mainloop, &attr, mainLoop, NULL);
+
+    sleep(2);
 
     return &s_callbacks;
 }

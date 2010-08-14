@@ -1233,68 +1233,7 @@ static void freeCardStatus(RIL_CardStatus *p_card_status) {
 
 static void pollSIMState (void *param)
 {
-#if 0
-    int ret;
-
-    if (sState != RADIO_STATE_SIM_NOT_READY) {
-        // no longer valid to poll
-        return;
-    }
-
-    switch(getSIMStatus()) {
-        case SIM_ABSENT:
-        case SIM_PIN:
-        case SIM_PUK:
-        case SIM_NETWORK_PERSONALIZATION:
-        default:
-            setRadioState(RADIO_STATE_SIM_LOCKED_OR_ABSENT);
-            return;
-
-        case SIM_NOT_READY:
-            RIL_requestTimedCallback (pollSIMState, NULL, &TIMEVAL_SIMPOLL);
-            return;
-
-        case SIM_READY:
-            setRadioState(RADIO_STATE_SIM_READY);
-            return;
-    }
-#endif
     setRadioState(RADIO_STATE_SIM_READY);
-}
-
-/** returns 1 if on, 0 if off, and -1 on error */
-static int isRadioOn()
-{
-#if 0
-    ATResponse *p_response = NULL;
-    int err;
-    char *line;
-    char ret;
-
-    err = at_send_command_singleline("AT+CFUN?", "+CFUN:", &p_response);
-
-    if (err < 0 || p_response->success == 0) {
-        // assume radio is off
-        goto error;
-    }
-
-    line = p_response->p_intermediates->line;
-
-    err = at_tok_start(&line);
-    if (err < 0) goto error;
-
-    err = at_tok_nextbool(&line, &ret);
-    if (err < 0) goto error;
-
-    at_response_free(p_response);
-
-    return (int)ret;
-
-error:
-
-    at_response_free(p_response);
-#endif
-    return -1;
 }
 
 /**
@@ -1304,82 +1243,6 @@ error:
 static void initializeCallback(void *param)
 {
     sleep(3);
-#if 0
-    ATResponse *p_response = NULL;
-    int err;
-
-    setRadioState (RADIO_STATE_OFF);
-
-    at_handshake();
-
-    /* note: we don't check errors here. Everything important will
-       be handled in onATTimeout and onATReaderClosed */
-
-    /*  atchannel is tolerant of echo but it must */
-    /*  have verbose result codes */
-    at_send_command("ATE0Q0V1", NULL);
-
-    /*  No auto-answer */
-    at_send_command("ATS0=0", NULL);
-
-    /*  Extended errors */
-    at_send_command("AT+CMEE=1", NULL);
-
-    /*  Network registration events */
-    err = at_send_command("AT+CREG=2", &p_response);
-
-    /* some handsets -- in tethered mode -- don't support CREG=2 */
-    if (err < 0 || p_response->success == 0) {
-        at_send_command("AT+CREG=1", NULL);
-    }
-
-    at_response_free(p_response);
-
-    /*  GPRS registration events */
-    at_send_command("AT+CGREG=1", NULL);
-
-    /*  Call Waiting notifications */
-    at_send_command("AT+CCWA=1", NULL);
-
-    /*  Alternating voice/data off */
-    at_send_command("AT+CMOD=0", NULL);
-
-    /*  Not muted */
-    at_send_command("AT+CMUT=0", NULL);
-
-    /*  +CSSU unsolicited supp service notifications */
-    at_send_command("AT+CSSN=0,1", NULL);
-
-    /*  no connected line identification */
-    at_send_command("AT+COLP=0", NULL);
-
-    /*  HEX character set */
-    at_send_command("AT+CSCS=\"HEX\"", NULL);
-
-    /*  USSD unsolicited */
-    at_send_command("AT+CUSD=1", NULL);
-
-    /*  Enable +CGEV GPRS event notifications, but don't buffer */
-    at_send_command("AT+CGEREP=1,0", NULL);
-
-    /*  SMS PDU mode */
-    at_send_command("AT+CMGF=0", NULL);
-
-#ifdef USE_TI_COMMANDS
-
-    at_send_command("AT%CPI=3", NULL);
-
-    /*  TI specific -- notifications when SMS is ready (currently ignored) */
-    at_send_command("AT%CSTAT=1", NULL);
-
-#endif /* USE_TI_COMMANDS */
-
-
-    /* assume radio is off on error */
-    if (isRadioOn() > 0) {
-        setRadioState (RADIO_STATE_SIM_NOT_READY);
-    }
-#endif
     setRadioState (RADIO_STATE_SIM_READY);
 }
 
@@ -1490,9 +1353,6 @@ mainLoop(void *param)
     g_main_loop_run(loop);
     LOGD("Main loop ended");
 
-    //waitForClose();
-    //LOGI("Re-opening after close");
-
     return 0;
 }
 
@@ -1589,7 +1449,7 @@ static int initOfono()
     LOGW("dbus connect - ok");
 
     error = NULL;
-    manager = dbus_g_proxy_new_for_name(connection, "org.ofono", "/", "org.ofono.Manager");
+    manager = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, "/", "org.ofono.Manager");
     if (!manager) {
         LOGE("Failed to create Manager proxy object: %s", error->message);
         return 0;
@@ -1603,11 +1463,11 @@ static int initOfono()
     const char *modemName = g_ptr_array_index(modemArr, 0);
     LOGD("ofono modem:%s\n", modemName);
     if (strstr("isimodem", modemName) != 0) {
-        LOGE("Modem name dosn't match: %s, but we expect \"isimodem\"", modemName);
+        LOGE("Modem name dosn't match: %s, but we expect \"%s\"", modemName, MODEM);
     }
 
     error = NULL;
-    modem = dbus_g_proxy_new_for_name(connection, "org.ofono", "/isimodem", "org.ofono.Modem");
+    modem = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, "org.ofono.Modem");
     if (!modem) {
         LOGE("Failed to create Modem proxy object: %s", error->message);
         return 0;
@@ -1616,7 +1476,6 @@ static int initOfono()
     dbus_g_proxy_connect_signal(modem,
                                 OFONO_SIGNAL_PROPERTY_CHANGED,
                                 G_CALLBACK(modem_property_changed), modem, NULL);
-    
     LOGW("modem proxy - ok");
 
     LOGW("Ofono initialization - ok");

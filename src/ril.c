@@ -51,6 +51,7 @@ typedef enum {
     SIM_NETWORK_PERSONALIZATION = 5
 } SIM_Status;
 
+static GHashTable* name_get_properties(const gchar *objPath, const gchar *ifaceName);
 
 static void onRequest (int request, void *data, size_t datalen, RIL_Token t);
 static RIL_RadioState currentState();
@@ -76,6 +77,7 @@ static const RIL_RadioFunctions s_callbacks = {
 
 const gchar MODEM[] = "/isimodem";
 const gchar OFONO_SERVICE[] = "org.ofono";
+const gchar OFONO_IFACE_CALL[] = "org.ofono.Call";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
 
 static GMainLoop *loop;
@@ -311,9 +313,25 @@ static void sendCallStateChanged(void *param)
         NULL, 0);
 }
 
+static void call_answer(const gchar *callPath, int answerOrHangup)
+{
+    const gchar *method = answerOrHangup ? "Answer" : "Hangup";
+    GError *error = NULL;
+    DBusGProxy *call = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, callPath, "org.ofono.VoiceCall");
+    if (call) {
+        if (!dbus_g_proxy_call(call, method, &error, G_TYPE_INVALID, G_TYPE_INVALID))
+            LOGE("Call->%s failed for %s: %s", method, callPath, error->message);
+    }
+    else
+        LOGE("Failed to create Call proxy object: %s", error->message);
+}
+
 static void call_to_rilcall(const gchar *callPath, RIL_Call *rilCall)
 {
     LOGD("call_to_rilcall(\"%s\", %p)", callPath, rilCall);
+
+    GHashTable *dict = name_get_properties(callPath, OFONO_IFACE_CALL);
+    
     rilCall->state = RIL_CALL_ACTIVE;
     rilCall->index = 1;
     rilCall->toa = 145;
@@ -335,6 +353,17 @@ static GHashTable* iface_get_properties(DBusGProxy *proxy)
     }
 
     return dict;
+}
+
+static GHashTable* name_get_properties(const gchar *objPath, const gchar *ifaceName)
+{
+    GError *error = NULL;
+    DBusGProxy *obj = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, objPath, ifaceName);
+    if (obj)
+        return iface_get_properties(obj);
+
+    LOGE("Failed to create Call proxy object: %s", error->message);
+    return 0;
 }
 
 static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
@@ -444,18 +473,14 @@ error:
 
 static void requestHangup(void *data, size_t datalen, RIL_Token t)
 {
-    int *p_line;
-
-    int ret;
-    char *cmd;
-
-    p_line = (int *)data;
+    char *path;
+    int *p_line = (int *)data;
 
     // 3GPP 22.030 6.5.5
     // "Releases a specific active call X"
-    asprintf(&cmd, "AT+CHLD=1%d", p_line[0]);
-
-    free(cmd);
+    asprintf(&path, "%s/voicecall%02d", MODEM, p_line[0]);
+    call_answer(path, 0);
+    free(path);
 
     /* success or failure is ignored by the upper layer here.
        it will call GET_CURRENT_CALLS and determine success that way */
@@ -883,7 +908,7 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
             break;
         case RIL_REQUEST_ANSWER:
-            //at_send_command("ATA", NULL);
+            call_answer("/isimodem/voicecall01", 1);
 
 #ifdef WORKAROUND_ERRONEOUS_ANSWER
             s_expectAnswer = 1;
@@ -1090,7 +1115,7 @@ static void onCancel (RIL_Token t)
 
 static const char * getVersion(void)
 {
-    return "NitDroid n-ril 0.0.1";
+    return "NitDroid ofono-ril 0.0.1";
 }
 
 void
@@ -1409,7 +1434,7 @@ static void vcm_property_changed(DBusGProxy *proxy, const gchar *property,
                                       NULL, 0);
         }
         else
-            LOGE("Failed to create Modem proxy object: %s", error->message);
+            LOGE("Failed to create Call proxy object: %s", error->message);
     }
     g_value_unset(value);
 }

@@ -77,11 +77,10 @@ static const RIL_RadioFunctions s_callbacks = {
 const gchar MODEM[] = "/isimodem";
 const gchar OFONO_SERVICE[] = "org.ofono";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
-const gchar OFONO_SIGNAL_CALL_ADDED[] = "CallAdded";
 
 static GMainLoop *loop;
 static DBusGConnection *connection;
-DBusGProxy *manager, *modem, *vcm;
+static DBusGProxy *manager, *modem, *vcm;
 
 #ifdef RIL_SHLIB
 static const struct RIL_Env *s_rilenv;
@@ -258,141 +257,12 @@ static void requestDataCallList(void *data, size_t datalen, RIL_Token t)
 
 static void requestOrSendDataCallList(RIL_Token *t)
 {
-#if 0
-    ATResponse *p_response;
-    ATLine *p_cur;
-    int err;
-    int n = 0;
-    char *out;
-
-    err = at_send_command_multiline ("AT+CGACT?", "+CGACT:", &p_response);
-    if (err != 0 || p_response->success == 0) {
-        if (t != NULL)
-            RIL_onRequestComplete(*t, RIL_E_GENERIC_FAILURE, NULL, 0);
-        else
-            RIL_onUnsolicitedResponse(RIL_UNSOL_DATA_CALL_LIST_CHANGED,
-                                      NULL, 0);
-        return;
-    }
-
-    for (p_cur = p_response->p_intermediates; p_cur != NULL;
-         p_cur = p_cur->p_next)
-        n++;
-
-    RIL_Data_Call_Response *responses =
-            alloca(n * sizeof(RIL_Data_Call_Response));
-
-    int i;
-    for (i = 0; i < n; i++) {
-        responses[i].cid = -1;
-        responses[i].active = -1;
-        responses[i].type = "";
-        responses[i].apn = "";
-        responses[i].address = "";
-    }
-
-    RIL_Data_Call_Response *response = responses;
-    for (p_cur = p_response->p_intermediates; p_cur != NULL;
-         p_cur = p_cur->p_next) {
-        char *line = p_cur->line;
-
-        err = at_tok_start(&line);
-        if (err < 0)
-            goto error;
-
-        err = at_tok_nextint(&line, &response->cid);
-        if (err < 0)
-            goto error;
-
-        err = at_tok_nextint(&line, &response->active);
-        if (err < 0)
-            goto error;
-
-        response++;
-    }
-
-    at_response_free(p_response);
-
-    err = at_send_command_multiline ("AT+CGDCONT?", "+CGDCONT:", &p_response);
-    if (err != 0 || p_response->success == 0) {
-        if (t != NULL)
-            RIL_onRequestComplete(*t, RIL_E_GENERIC_FAILURE, NULL, 0);
-        else
-            RIL_onUnsolicitedResponse(RIL_UNSOL_DATA_CALL_LIST_CHANGED,
-                                      NULL, 0);
-        return;
-    }
-
-    for (p_cur = p_response->p_intermediates; p_cur != NULL;
-         p_cur = p_cur->p_next) {
-        char *line = p_cur->line;
-        int cid;
-        char *type;
-        char *apn;
-        char *address;
-
-
-        err = at_tok_start(&line);
-        if (err < 0)
-            goto error;
-
-        err = at_tok_nextint(&line, &cid);
-        if (err < 0)
-            goto error;
-
-        for (i = 0; i < n; i++) {
-            if (responses[i].cid == cid)
-                break;
-        }
-
-        if (i >= n) {
-            /* details for a context we didn't hear about in the last request */
-            continue;
-        }
-
-        err = at_tok_nextstr(&line, &out);
-        if (err < 0)
-            goto error;
-
-        responses[i].type = alloca(strlen(out) + 1);
-        strcpy(responses[i].type, out);
-
-        err = at_tok_nextstr(&line, &out);
-        if (err < 0)
-            goto error;
-
-        responses[i].apn = alloca(strlen(out) + 1);
-        strcpy(responses[i].apn, out);
-
-        err = at_tok_nextstr(&line, &out);
-        if (err < 0)
-            goto error;
-
-        responses[i].address = alloca(strlen(out) + 1);
-        strcpy(responses[i].address, out);
-    }
-
-    at_response_free(p_response);
-
-    if (t != NULL)
-        RIL_onRequestComplete(*t, RIL_E_SUCCESS, responses,
-                              n * sizeof(RIL_Data_Call_Response));
-    else
-        RIL_onUnsolicitedResponse(RIL_UNSOL_DATA_CALL_LIST_CHANGED,
-                                  responses,
-                                  n * sizeof(RIL_Data_Call_Response));
-
-    return;
-
-error:
-    if (t != NULL)
-        RIL_onRequestComplete(*t, RIL_E_GENERIC_FAILURE, NULL, 0);
-    else
+    if (!t) {
         RIL_onUnsolicitedResponse(RIL_UNSOL_DATA_CALL_LIST_CHANGED,
                                   NULL, 0);
-
-    at_response_free(p_response);
-#endif
+        return;
+    }
+    RIL_onRequestComplete(*t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
 static void requestQueryNetworkSelectionMode(
@@ -441,19 +311,49 @@ static void sendCallStateChanged(void *param)
         NULL, 0);
 }
 
+static void call_to_rilcall(const gchar *callPath, RIL_Call *rilCall)
+{
+    LOGD("call_to_rilcall(\"%s\", %p)", callPath, rilCall);
+    rilCall->state = RIL_CALL_ACTIVE;
+    rilCall->index = 1;
+    rilCall->toa = 145;
+    rilCall->isVoice = 1;
+    rilCall->number = "911";
+    rilCall->name = "Elvis";
+}
+
 static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 {
     int err;
     int countCalls;
-    int countValidCalls;
     RIL_Call *p_calls;
     RIL_Call **pp_calls;
     int i;
     int needRepoll = 0;
 
-    /* count the calls */
-    countCalls = 0;
+    if (!vcm) {
+        LOGE("!VCM");
+        //RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+        RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
+        return;
+    }
 
+    GError *error = 0;
+    GValue *value = 0;
+    LOGD("calling GetCalls, %p", t);
+    if (!dbus_g_proxy_call(vcm, "GetCalls",
+                           &error, G_TYPE_INVALID, G_TYPE_VALUE, &value, G_TYPE_INVALID))
+    {
+        LOGE("vcm.GetCalls failed: %s", error->message);
+        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+        return;
+    }
+
+    /* count the calls */
+    GPtrArray *callsArr = g_value_peek_pointer(value);
+    countCalls = callsArr->len;
+    LOGD("countCalls size: %d", countCalls);
+    
     /* yes, there's an array of pointers and then an array of structures */
 
     pp_calls = (RIL_Call **)alloca(countCalls * sizeof(RIL_Call *));
@@ -463,31 +363,11 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
     /* init the pointer array */
     for(i = 0; i < countCalls ; i++) {
         pp_calls[i] = &(p_calls[i]);
+        call_to_rilcall(g_ptr_array_index(callsArr, i), &(p_calls[i]));
     }
-
-#if 0
-    for (countValidCalls = 0, p_cur = p_response->p_intermediates
-                 ; p_cur != NULL
-                 ; p_cur = p_cur->p_next
-         ) {
-        //err = callFromCLCCLine(p_cur->line, p_calls + countValidCalls);
-
-        if (err != 0) {
-            continue;
-        }
-
-        if (p_calls[countValidCalls].state != RIL_CALL_ACTIVE
-            && p_calls[countValidCalls].state != RIL_CALL_HOLDING
-            ) {
-            needRepoll = 1;
-        }
-
-        countValidCalls++;
-    }
-#endif
 
     RIL_onRequestComplete(t, RIL_E_SUCCESS, pp_calls,
-                          countValidCalls * sizeof (RIL_Call *));
+                          countCalls * sizeof (RIL_Call *));
 
     return;
 error:
@@ -497,22 +377,27 @@ error:
 static void requestDial(void *data, size_t datalen, RIL_Token t)
 {
     RIL_Dial *p_dial;
-    char *cmd;
-    const char *clir;
+    const gchar *clir;
     int ret;
 
     p_dial = (RIL_Dial *)data;
 
     switch (p_dial->clir) {
-        case 1: clir = "I"; break;  /*invocation*/
-        case 2: clir = "i"; break;  /*suppression*/
+        case 1: clir = "enabled"; break;   /*invocation*/
+        case 2: clir = "disabled"; break;  /*suppression*/
         default:
         case 0: clir = ""; break;   /*subscription default*/
     }
 
-    asprintf(&cmd, "ATD%s%s;", p_dial->address, clir);
-
-    free(cmd);
+    GError *error = NULL;
+    GValue *value = 0;
+    if (!dbus_g_proxy_call(vcm, "Dial", &error,
+                           G_TYPE_STRING, p_dial->address, G_TYPE_STRING, clir,
+                           G_TYPE_INVALID, G_TYPE_VALUE, value, G_TYPE_INVALID))
+    {
+        LOGE("VCM.Dial(%s, %s) failed: %s",
+             p_dial->address, clir, error->message);
+    }
 
     /* success or failure is ignored by the upper layer here.
        it will call GET_CURRENT_CALLS and determine success that way */
@@ -1250,7 +1135,7 @@ getSIMStatus()
         return SIM_NOT_READY;
     }
 
-    return SIM_NOT_READY; // modem_sim_getstatus();
+    return SIM_READY; // modem_sim_getstatus();
 }
 
 
@@ -1605,13 +1490,20 @@ static int setProperty(DBusGProxy *proxy, const gchar *property, GValue *value)
     return 0;
 }
 
-static void voicecall_property_changed(DBusGProxy *proxy, const gchar *property,
+static void call_property_changed(DBusGProxy *proxy, const gchar *property,
                                    GValue *value, gpointer user_data)
 {
     // XXX
-    LOGE("voicecall_property_changed: %s->%s", property, g_strdup_value_contents(value));
-    //if (g_strcmp0(property, OFONO_PROPERTY_INTERFACES) == 0)
-    //update_interfaces(self, value);
+    LOGE("call_property_changed: %s->%s", property, g_strdup_value_contents(value));
+    if (g_strcmp0(property, "State")) {
+        if (g_strcmp0("disconnected", g_value_peek_pointer(value))) {
+            LOGD("Call->disconnected");
+        }
+        RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
+                                  NULL, 0);
+        RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
+                                  NULL, 0);
+    }
 
     g_value_unset(value);
 }
@@ -1621,6 +1513,34 @@ static void vcm_property_changed(DBusGProxy *proxy, const gchar *property,
 {
     // XXX
     LOGW("vcm_property_changed %s->%s", property, g_strdup_value_contents(value));
+
+    if (!g_strcmp0("Calls", property)) {
+        GPtrArray *callArr = g_value_peek_pointer(value);
+        if (!callArr->len) {
+            LOGD("Calls is empty. Disconnected?");
+            g_value_unset(value);
+            return;
+        }
+
+        const char *callPath = g_ptr_array_index(callArr, 0);
+        LOGD("Call: %s\n", callPath);
+
+        // new call
+        GError *error = NULL;
+        DBusGProxy *call = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, callPath, "org.ofono.VoiceCall");
+        if (call) {
+            dbus_g_proxy_add_signal(call, OFONO_SIGNAL_PROPERTY_CHANGED,
+                                    G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+            dbus_g_proxy_connect_signal(call,
+                                        OFONO_SIGNAL_PROPERTY_CHANGED,
+                                        G_CALLBACK(call_property_changed), vcm, NULL);
+            RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
+                                      NULL, 0);
+        }
+        else
+            LOGE("Failed to create Modem proxy object: %s", error->message);
+    }
+    g_value_unset(value);
 }
 
 static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
@@ -1663,7 +1583,7 @@ static int initOfono()
         LOGE("Failed to create Manager proxy object: %s", error->message);
         return 0;
     }
-    LOGW("proxy manager - ok");
+    LOGD("proxy manager - ok");
 
     error = NULL;
     GHashTable *dict;

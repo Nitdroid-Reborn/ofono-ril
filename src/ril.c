@@ -74,11 +74,14 @@ static const RIL_RadioFunctions s_callbacks = {
     getVersion
 };
 
+const gchar MODEM[] = "/isimodem";
+const gchar OFONO_SERVICE[] = "org.ofono";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
+const gchar OFONO_SIGNAL_CALL_ADDED[] = "CallAdded";
 
 static GMainLoop *loop;
 static DBusGConnection *connection;
-DBusGProxy *manager, *modem;
+DBusGProxy *manager, *modem, *vcm;
 
 #ifdef RIL_SHLIB
 static const struct RIL_Env *s_rilenv;
@@ -1613,13 +1616,32 @@ static void voicecall_property_changed(DBusGProxy *proxy, const gchar *property,
     g_value_unset(value);
 }
 
+static void vcm_property_changed(DBusGProxy *proxy, const gchar *property,
+                                 GValue *value, gpointer user_data)
+{
+    // XXX
+    LOGW("vcm_property_changed %s->%s", property, g_strdup_value_contents(value));
+}
+
 static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                                    GValue *value, gpointer user_data)
 {
     // XXX
-    LOGE("modem_property_changed: %s->%s", property, g_strdup_value_contents(value));
-    //if (g_strcmp0(property, OFONO_PROPERTY_INTERFACES) == 0)
-    //update_interfaces(self, value);
+    LOGD("modem_property_changed: %s->%s", property, g_strdup_value_contents(value));
+
+    if (g_strcmp0(property, "Online") == 0) {
+        //setRadioState()
+        GError *error = NULL;
+        vcm = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, "org.ofono.VoiceCallManager");
+        if (vcm) {
+            dbus_g_proxy_add_signal(vcm, OFONO_SIGNAL_PROPERTY_CHANGED, G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+            dbus_g_proxy_connect_signal(vcm,
+                                        OFONO_SIGNAL_PROPERTY_CHANGED,
+                                        G_CALLBACK(vcm_property_changed), vcm, NULL);
+        }
+        else
+            LOGE("Failed to create Modem proxy object: %s", error->message);
+    }
 
     g_value_unset(value);
 }
@@ -1710,7 +1732,7 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
     if (initOfono())
         return 0;
 
-#if 1
+#if 0
     LOGD("Running main loop");
     g_main_loop_run(loop);
 #endif

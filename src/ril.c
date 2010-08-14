@@ -322,6 +322,21 @@ static void call_to_rilcall(const gchar *callPath, RIL_Call *rilCall)
     rilCall->name = "Elvis";
 }
 
+static GHashTable* iface_get_properties(DBusGProxy *proxy)
+{
+    GError *error = NULL;
+    GHashTable *dict = 0;
+    if (!dbus_g_proxy_call(proxy, "GetProperties", &error, G_TYPE_INVALID,
+                           dbus_g_type_get_map("GHashTable", G_TYPE_STRING, G_TYPE_VALUE), &dict,
+                           G_TYPE_INVALID))
+    {
+        LOGE(".GetProperties failed: %s", error->message);
+        return 0;
+    }
+
+    return dict;
+}
+
 static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 {
     int err;
@@ -333,23 +348,19 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 
     if (!vcm) {
         LOGE("!VCM");
-        //RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
         RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
         return;
     }
 
-    GError *error = 0;
-    GValue *value = 0;
-    LOGD("calling GetCalls, %p", t);
-    if (!dbus_g_proxy_call(vcm, "GetCalls",
-                           &error, G_TYPE_INVALID, G_TYPE_VALUE, &value, G_TYPE_INVALID))
-    {
-        LOGE("vcm.GetCalls failed: %s", error->message);
-        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+    /* get the calls */
+    GHashTable *dict = iface_get_properties(vcm);
+    if (!dict) {
+        LOGE("vcm.GetProperties failed");
+        RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
         return;
     }
-
-    /* count the calls */
+    
+    GValue *value = (GValue *) g_hash_table_lookup(dict, "Calls");
     GPtrArray *callsArr = g_value_peek_pointer(value);
     countCalls = callsArr->len;
     LOGD("countCalls size: %d", countCalls);
@@ -1585,16 +1596,7 @@ static int initOfono()
     }
     LOGD("proxy manager - ok");
 
-    error = NULL;
-    GHashTable *dict;
-    if (!dbus_g_proxy_call(manager, "GetProperties", &error, G_TYPE_INVALID,
-                           dbus_g_type_get_map("GHashTable", G_TYPE_STRING, G_TYPE_VALUE), &dict,
-                           G_TYPE_INVALID))
-    {
-        LOGE("Manager.GetProperties failed: %s", error->message);
-        return 0;
-    }
-
+    GHashTable *dict = iface_get_properties(manager);
     GValue *value = (GValue *) g_hash_table_lookup(dict, "Modems");
     GPtrArray *modemArr = g_value_peek_pointer(value);
 

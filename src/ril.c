@@ -77,7 +77,7 @@ static const RIL_RadioFunctions s_callbacks = {
 
 const gchar MODEM[] = "/isimodem";
 const gchar OFONO_SERVICE[] = "org.ofono";
-const gchar OFONO_IFACE_CALL[] = "org.ofono.Call";
+const gchar OFONO_IFACE_CALL[] = "org.ofono.VoiceCall";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
 
 static GMainLoop *loop;
@@ -107,17 +107,17 @@ static const struct timeval TIMEVAL_0 = {0,0};
 static void pollSIMState (void *param);
 static void setRadioState(RIL_RadioState newState);
 
-static int clccStateToRILState(int state, RIL_CallState *p_state)
+static RIL_CallState ofonoStateToRILState(const gchar *state)
 {
-    switch(state) {
-        case 0: *p_state = RIL_CALL_ACTIVE;   return 0;
-        case 1: *p_state = RIL_CALL_HOLDING;  return 0;
-        case 2: *p_state = RIL_CALL_DIALING;  return 0;
-        case 3: *p_state = RIL_CALL_ALERTING; return 0;
-        case 4: *p_state = RIL_CALL_INCOMING; return 0;
-        case 5: *p_state = RIL_CALL_WAITING;  return 0;
-        default: return -1;
-    }
+    if (!g_strcmp0(state, "active")) return RIL_CALL_ACTIVE;
+    if (!g_strcmp0(state, "held")) return RIL_CALL_HOLDING;
+    if (!g_strcmp0(state, "dialing")) return RIL_CALL_DIALING;
+    if (!g_strcmp0(state, "alerting")) return RIL_CALL_ALERTING;
+    if (!g_strcmp0(state, "incoming")) return RIL_CALL_INCOMING;
+    if (!g_strcmp0(state, "waiting")) return RIL_CALL_WAITING;
+
+    LOGE("Bad callstate: %s", state);
+    return (RIL_CallState) 0xffffffff;
 }
 
 /**
@@ -326,18 +326,33 @@ static void call_answer(const gchar *callPath, int answerOrHangup)
         LOGE("Failed to create Call proxy object: %s", error->message);
 }
 
-static void call_to_rilcall(const gchar *callPath, RIL_Call *rilCall)
+static int call_to_rilcall(const gchar *callPath, RIL_Call *rilCall)
 {
     LOGD("call_to_rilcall(\"%s\", %p)", callPath, rilCall);
 
     GHashTable *dict = name_get_properties(callPath, OFONO_IFACE_CALL);
+    if (!dict)
+        return 0;
+
+    GValue *valueState = (GValue *) g_hash_table_lookup(dict, "State");
+    const gchar *state = g_value_peek_pointer(valueState);
     
-    rilCall->state = RIL_CALL_ACTIVE;
+    GValue *valueId = (GValue *) g_hash_table_lookup(dict, "LineIdentification");
+    const gchar *id = g_value_peek_pointer(valueId);
+    
+    LOGD("Call state: %s, LineIdentification: %s", state, id);
+    RIL_CallState rilState = ofonoStateToRILState(state);
+    if (rilState == 0xffffffff)
+        return 0;
+
+    rilCall->state = rilState;
     rilCall->index = 1;
     rilCall->toa = 145;
     rilCall->isVoice = 1;
-    rilCall->number = "911";
+    rilCall->number = id; // XXX
     rilCall->name = "Elvis";
+
+    return 1;
 }
 
 static GHashTable* iface_get_properties(DBusGProxy *proxy)
@@ -403,7 +418,10 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
     /* init the pointer array */
     for(i = 0; i < countCalls ; i++) {
         pp_calls[i] = &(p_calls[i]);
-        call_to_rilcall(g_ptr_array_index(callsArr, i), &(p_calls[i]));
+        if (!call_to_rilcall(g_ptr_array_index(callsArr, i), &(p_calls[i]))) {
+            --i;
+            --countCalls;
+        }
     }
 
     RIL_onRequestComplete(t, RIL_E_SUCCESS, pp_calls,
@@ -881,8 +899,8 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 
             /* success or failure is ignored by the upper layer here.
                it will call GET_CURRENT_CALLS and determine success that way */
-            RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
-            break;
+            //RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+            //break;
         case RIL_REQUEST_HANGUP_FOREGROUND_RESUME_BACKGROUND:
             // 3GPP 22.030 6.5.5
             // "Releases all active calls (if any exist) and accepts
@@ -891,6 +909,7 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 
             /* success or failure is ignored by the upper layer here.
                it will call GET_CURRENT_CALLS and determine success that way */
+            call_answer("/isimodem/voicecall01", 0);
             RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
             break;
         case RIL_REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE:
@@ -1397,8 +1416,6 @@ static void call_property_changed(DBusGProxy *proxy, const gchar *property,
         }
         RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
                                   NULL, 0);
-        RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
-                                  NULL, 0);
     }
 
     g_value_unset(value);
@@ -1423,7 +1440,7 @@ static void vcm_property_changed(DBusGProxy *proxy, const gchar *property,
 
         // new call
         GError *error = NULL;
-        DBusGProxy *call = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, callPath, "org.ofono.VoiceCall");
+        DBusGProxy *call = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, callPath, OFONO_IFACE_CALL);
         if (call) {
             dbus_g_proxy_add_signal(call, OFONO_SIGNAL_PROPERTY_CHANGED,
                                     G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);

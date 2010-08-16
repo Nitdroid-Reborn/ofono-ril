@@ -384,7 +384,7 @@ static GHashTable* name_get_properties(const gchar *objPath, const gchar *ifaceN
 static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 {
     int err;
-    int countCalls;
+    int countCalls, validCalls = 0;
     RIL_Call *p_calls;
     RIL_Call **pp_calls;
     int i;
@@ -407,7 +407,6 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
     GValue *value = (GValue *) g_hash_table_lookup(dict, "Calls");
     GPtrArray *callsArr = g_value_peek_pointer(value);
     countCalls = callsArr->len;
-    LOGD("countCalls size: %d", countCalls);
     
     /* yes, there's an array of pointers and then an array of structures */
 
@@ -422,8 +421,11 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
             --i;
             --countCalls;
         }
+        else
+            ++validCalls;
     }
 
+    LOGD("countCalls/validCalls: %d/%d", countCalls, validCalls);
     RIL_onRequestComplete(t, RIL_E_SUCCESS, pp_calls,
                           countCalls * sizeof (RIL_Call *));
 
@@ -1432,6 +1434,8 @@ static void vcm_property_changed(DBusGProxy *proxy, const gchar *property,
         if (!callArr->len) {
             LOGD("Calls is empty. Disconnected?");
             g_value_unset(value);
+            RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
+                                      NULL, 0);
             return;
         }
 

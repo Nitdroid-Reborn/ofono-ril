@@ -78,11 +78,13 @@ static const RIL_RadioFunctions s_callbacks = {
 const gchar MODEM[] = "/isimodem";
 const gchar OFONO_SERVICE[] = "org.ofono";
 const gchar OFONO_IFACE_CALL[] = "org.ofono.VoiceCall";
+const gchar OFONO_IFACE_SIMMANAGER[] = "org.ofono.SimManager";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
 
 static GMainLoop *loop;
 static DBusGConnection *connection;
-static DBusGProxy *manager, *modem, *vcm;
+static DBusGProxy *manager, *modem, *vcm, *sim;
+static int goingOnline = 0;
 
 #ifdef RIL_SHLIB
 static const struct RIL_Env *s_rilenv;
@@ -222,6 +224,23 @@ static void onSIMReady()
 #endif
 }
 
+static int obj_set_property(DBusGProxy *obj, const gchar *prop, GValue *value)
+{
+    GError *error = NULL;
+    if (obj) {
+        if ( !dbus_g_proxy_call(modem, "SetProperty", &error,
+                                G_TYPE_STRING, prop,
+                                G_TYPE_VALUE, value,
+                                G_TYPE_INVALID) )
+        {
+            LOGE("%s->SetProperty(%s) to %p failed: %s",
+                 dbus_g_proxy_get_bus_name(obj),
+                 prop, value, error->message);
+        }
+    }
+    return error != NULL;
+}
+
 /* Toggle radio on and off (for "airplane" mode) */
 static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 {
@@ -231,18 +250,18 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
     assert (datalen >= sizeof(int *));
     onOff = ((int *)data)[0];
 
-    if (onOff == 0 && sState != RADIO_STATE_OFF) {
-        //modem_power_off();
+    GValue value = { 0 };
+    g_value_init(&value, G_TYPE_BOOLEAN);
+    if (onOff == 0 /*&& sState != RADIO_STATE_OFF*/) {
+        g_value_set_boolean(&value, FALSE);
+        obj_set_property(modem, "Powered", &value);
         setRadioState(RADIO_STATE_OFF);
-        //RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
-        //modem_online(0, allocCallback(t, 0));
-    } else if (onOff > 0 && sState == RADIO_STATE_OFF) {
-        //modem_power_on();
-        //setRadioState(RADIO_STATE_SIM_NOT_READY);
-        //sleep(3);
-        //modem_online(1, allocCallback(t, 0));
-        //setRadioState(RADIO_STATE_SIM_READY);
+    } else if (onOff > 0 /*&& sState == RADIO_STATE_OFF*/) {
+        g_value_set_boolean(&value, TRUE);
+        obj_set_property(modem, "Powered", &value);
     }
+
+    RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 }
 
 static void requestOrSendDataCallList(RIL_Token *t);
@@ -349,7 +368,7 @@ static int call_to_rilcall(const gchar *callPath, RIL_Call *rilCall)
     rilCall->index = 1;
     rilCall->toa = 145;
     rilCall->isVoice = 1;
-    rilCall->number = id; // XXX
+    rilCall->number = (char*)id; // XXX
     rilCall->name = "Elvis";
 
     return 1;
@@ -1289,7 +1308,7 @@ static void pollSIMState (void *param)
 static void initializeCallback(void *param)
 {
     sleep(3);
-    setRadioState (RADIO_STATE_SIM_READY);
+    setRadioState(RADIO_STATE_OFF);
 }
 
 static void waitForClose()
@@ -1460,6 +1479,15 @@ static void vcm_property_changed(DBusGProxy *proxy, const gchar *property,
     g_value_unset(value);
 }
 
+static void sim_property_changed(DBusGProxy *proxy, const gchar *property,
+                                 GValue *value, gpointer user_data)
+{
+    // XXX
+    LOGW("sim_property_changed %s->%s", property, g_strdup_value_contents(value));
+    g_value_unset(value);
+}
+
+
 static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                                    GValue *value, gpointer user_data)
 {
@@ -1475,10 +1503,48 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
             dbus_g_proxy_connect_signal(vcm,
                                         OFONO_SIGNAL_PROPERTY_CHANGED,
                                         G_CALLBACK(vcm_property_changed), vcm, NULL);
+            setRadioState(RADIO_STATE_SIM_READY);
         }
         else
-            LOGE("Failed to create Modem proxy object: %s", error->message);
+            LOGE("Failed to create VCM proxy object: %s", error->message);
     }
+    else if (g_strcmp0(property, "Interfaces") == 0) {
+        const gchar **ifArr = g_value_peek_pointer(value);
+        LOGD("Interfaces:");
+        while(*ifArr) {
+            LOGD("  >> %s", *ifArr);
+            if (!sim && !g_strcmp0(*ifArr, OFONO_IFACE_SIMMANAGER)) {
+                GError *error = NULL;
+                sim = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_SIMMANAGER);
+                if (sim) {
+                    dbus_g_proxy_add_signal(sim, OFONO_SIGNAL_PROPERTY_CHANGED,
+                                            G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+                    dbus_g_proxy_connect_signal(sim,
+                                                OFONO_SIGNAL_PROPERTY_CHANGED,
+                                                G_CALLBACK(sim_property_changed), sim, NULL);
+                    LOGW("Sim proxy created");
+                    //setRadioState (RADIO_STATE_SIM_READY);
+                }
+                else
+                    LOGE("Failed to create SIM proxy object: %s", error->message);
+            }
+            else if (!goingOnline && !g_strcmp0(*ifArr, "org.ofono.Phonebook")) {
+                LOGW("Phonebook is created, going online");
+                GValue value = { 0 };
+                g_value_init(&value, G_TYPE_BOOLEAN);
+                g_value_set_boolean(&value, TRUE);
+                obj_set_property(modem, "Online", &value);
+                goingOnline = 1;
+            }
+            ifArr++;
+        }
+    }
+#if 0
+    else if (g_strcmp0(property, "Powered") == 0) {
+        if (g_value_get_boolean(value) == TRUE) {
+        }
+    }
+#endif
 
     g_value_unset(value);
 }
@@ -1505,6 +1571,11 @@ static int initOfono()
     GHashTable *dict = iface_get_properties(manager);
     GValue *value = (GValue *) g_hash_table_lookup(dict, "Modems");
     GPtrArray *modemArr = g_value_peek_pointer(value);
+
+    if (!modemArr->len) {
+        LOGE("modemArr->len is empty. Probably, modem isn't detected yet.");
+        return 0;
+    }
 
     const char *modemName = g_ptr_array_index(modemArr, 0);
     LOGD("ofono modem:%s\n", modemName);

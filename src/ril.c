@@ -435,18 +435,14 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 
     /* init the pointer array */
     for(i = 0; i < countCalls ; i++) {
-        pp_calls[i] = &(p_calls[i]);
-        if (!call_to_rilcall(g_ptr_array_index(callsArr, i), &(p_calls[i]))) {
-            --i;
-            --countCalls;
-        }
-        else
+        pp_calls[validCalls] = &(p_calls[validCalls]);
+        if (call_to_rilcall(g_ptr_array_index(callsArr, i), &(p_calls[validCalls])))
             ++validCalls;
     }
 
     LOGD("countCalls/validCalls: %d/%d", countCalls, validCalls);
     RIL_onRequestComplete(t, RIL_E_SUCCESS, pp_calls,
-                          countCalls * sizeof (RIL_Call *));
+                          validCalls * sizeof (RIL_Call *));
 
     return;
 error:

@@ -79,11 +79,12 @@ const gchar MODEM[] = "/isimodem";
 const gchar OFONO_SERVICE[] = "org.ofono";
 const gchar OFONO_IFACE_CALL[] = "org.ofono.VoiceCall";
 const gchar OFONO_IFACE_SIMMANAGER[] = "org.ofono.SimManager";
+const gchar OFONO_IFACE_NETREG[] = "org.ofono.NetworkRegistration";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
 
 static GMainLoop *loop;
 static DBusGConnection *connection;
-static DBusGProxy *manager, *modem, *vcm, *sim;
+static DBusGProxy *manager, *modem, *vcm, *sim, *netreg;
 static int goingOnline = 0;
 
 #ifdef RIL_SHLIB
@@ -1294,7 +1295,7 @@ static void freeCardStatus(RIL_CardStatus *p_card_status) {
 
 static void pollSIMState (void *param)
 {
-    setRadioState(RADIO_STATE_SIM_READY);
+    setRadioState(!!sim ? RADIO_STATE_SIM_READY : RADIO_STATE_SIM_NOT_READY);
 }
 
 /**
@@ -1483,16 +1484,24 @@ static void sim_property_changed(DBusGProxy *proxy, const gchar *property,
     g_value_unset(value);
 }
 
+static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
+                                    GValue *value, gpointer user_data)
+{
+    // XXX
+    LOGW("netreg_property_changed %s->%s", property, g_strdup_value_contents(value));
+    g_value_unset(value);
+}
+
 
 static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                                    GValue *value, gpointer user_data)
 {
     // XXX
     LOGD("modem_property_changed: %s->%s", property, g_strdup_value_contents(value));
+    GError *error = NULL;
 
     if (g_strcmp0(property, "Online") == 0) {
         //setRadioState()
-        GError *error = NULL;
         vcm = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, "org.ofono.VoiceCallManager");
         if (vcm) {
             dbus_g_proxy_add_signal(vcm, OFONO_SIGNAL_PROPERTY_CHANGED, G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
@@ -1510,7 +1519,6 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
         while(*ifArr) {
             LOGD("  >> %s", *ifArr);
             if (!sim && !g_strcmp0(*ifArr, OFONO_IFACE_SIMMANAGER)) {
-                GError *error = NULL;
                 sim = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_SIMMANAGER);
                 if (sim) {
                     dbus_g_proxy_add_signal(sim, OFONO_SIGNAL_PROPERTY_CHANGED,
@@ -1531,6 +1539,19 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                 g_value_set_boolean(&value, TRUE);
                 obj_set_property(modem, "Online", &value);
                 goingOnline = 1;
+            }
+            else if (!netreg && !g_strcmp0(*ifArr, OFONO_IFACE_NETREG)) {
+                netreg = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_NETREG);
+                if (netreg) {
+                    dbus_g_proxy_add_signal(netreg, OFONO_SIGNAL_PROPERTY_CHANGED,
+                                            G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+                    dbus_g_proxy_connect_signal(netreg,
+                                                OFONO_SIGNAL_PROPERTY_CHANGED,
+                                                G_CALLBACK(netreg_property_changed), netreg, NULL);
+                    LOGW("NetReg proxy created");
+                }
+                else
+                    LOGE("Failed to create SIM proxy object: %s", error->message);
             }
             ifArr++;
         }

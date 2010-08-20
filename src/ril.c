@@ -87,6 +87,12 @@ static DBusGConnection *connection;
 static DBusGProxy *manager, *modem, *vcm, *sim, *netreg;
 static int goingOnline = 0;
 
+static int netregStatus = 0; // Not registered
+static unsigned int netregLAC, netregCID, netregStrength;
+
+static char *netregOperator = 0;
+static char netregMCC[4], netregMNC[4];
+
 #ifdef RIL_SHLIB
 static const struct RIL_Env *s_rilenv;
 
@@ -333,6 +339,13 @@ static void sendCallStateChanged(void *param)
         NULL, 0);
 }
 
+static void sendNetworkStateChanged()
+{
+    RIL_onUnsolicitedResponse(
+        RIL_UNSOL_RESPONSE_NETWORK_STATE_CHANGED,
+        NULL, 0);
+}
+
 static void call_answer(const gchar *callPath, int answerOrHangup)
 {
     const gchar *method = answerOrHangup ? "Answer" : "Hangup";
@@ -525,36 +538,69 @@ static void requestHangup(void *data, size_t datalen, RIL_Token t)
 
 static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 {
-    RIL_SignalStrength st;
+    static RIL_SignalStrength st;
 
     st.GW_SignalStrength.signalStrength = 20;
     st.GW_SignalStrength.bitErrorRate = 0;
 
     RIL_onRequestComplete(t, RIL_E_SUCCESS, &st, sizeof(st));
-    return;
+}
+
+static void requestGPRSRegistrationState(int request, void *data,
+                                         size_t datalen, RIL_Token t)
+{
+    char *responseStr[4];
+    memset(responseStr, sizeof(responseStr), 0);
+
+    switch(netregStatus) {
+        case 1:
+        case 2:
+        case 5:
+            asprintf(&responseStr[0], "%d", netregStatus);
+            asprintf(&responseStr[1], "%x", netregLAC);
+            asprintf(&responseStr[2], "%x", netregCID);
+            asprintf(&responseStr[3], "%d", 2); // Technology: EDGE
+            LOGD("requestGPRSRegistrationState success");
+            RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, sizeof(responseStr));
+            break;
+        default:
+            RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
+    }
 }
 
 static void requestRegistrationState(int request, void *data,
                                      size_t datalen, RIL_Token t)
 {
-    char *responseStr[4];
+    static char *responseStr[14];
+    memset(responseStr, sizeof(responseStr), 0);
 
-    responseStr[0] = "1"; // Registered, home network
-    asprintf(&responseStr[1], "%x", 530); // LAC
-    asprintf(&responseStr[2], "%x", 61320);
-    asprintf(&responseStr[3], "%d", 2); // Technology: EDGE
-
-    RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, 4*sizeof(char*));
+    if (netregStatus == 1) {
+        asprintf(&responseStr[0], "%d", netregStatus);
+        asprintf(&responseStr[1], "%x", netregLAC);
+        asprintf(&responseStr[2], "%x", netregCID);
+        asprintf(&responseStr[3], "%d", 2); // Technology: EDGE
+        LOGD("requestRegistrationState success");
+        RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, sizeof(responseStr));
+    }
+    else
+        RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
 }
 
 static void requestOperator(void *data, size_t datalen, RIL_Token t)
 {
     char *response[3];
-    response[0] = "MTS RUS";
-    response[1] = "MTS";
-    response[2] = "250250";
+    memset(response, sizeof(response), 0);
     
-    RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
+    if (netregStatus == 1) {
+        response[0] = netregOperator;
+        response[1] = netregOperator;
+        asprintf(&response[2], "%s%s", netregMCC, netregMNC);
+        RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
+    }
+    else {
+        response[0] = NULL;
+        RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
+    }
 }
 
 static void requestSendSMS(void *data, size_t datalen, RIL_Token t)
@@ -999,8 +1045,10 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             requestSignalStrength(data, datalen, t);
             break;
         case RIL_REQUEST_REGISTRATION_STATE:
-        case RIL_REQUEST_GPRS_REGISTRATION_STATE:
             requestRegistrationState(request, data, datalen, t);
+            break;
+        case RIL_REQUEST_GPRS_REGISTRATION_STATE:
+            requestGPRSRegistrationState(request, data, datalen, t);
             break;
         case RIL_REQUEST_OPERATOR:
             requestOperator(data, datalen, t);
@@ -1028,10 +1076,8 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             break;
 
         case RIL_REQUEST_GET_IMSI:
+            RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
             break;
-
-            RIL_onRequestComplete(t, RIL_E_SUCCESS,
-                                  "123123123123", sizeof(char *));
         case RIL_REQUEST_GET_IMEI:
             RIL_onRequestComplete(t, RIL_E_SUCCESS,
                                   "123123123123", sizeof(char *));
@@ -1062,7 +1108,7 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             break;
 
         case RIL_REQUEST_SET_NETWORK_SELECTION_AUTOMATIC:
-            //at_send_command("AT+COPS=0", NULL);
+            RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
             break;
 
         case RIL_REQUEST_DATA_CALL_LIST:
@@ -1183,7 +1229,7 @@ setRadioState(RIL_RadioState newState)
 
 
     /* do these outside of the mutex */
-    if (sState != oldState) {
+    /*if (sState != oldState)*/ {
         RIL_onUnsolicitedResponse (RIL_UNSOL_RESPONSE_RADIO_STATE_CHANGED,
                                    NULL, 0);
 
@@ -1489,6 +1535,44 @@ static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
 {
     // XXX
     LOGW("netreg_property_changed %s->%s", property, g_strdup_value_contents(value));
+
+    if (!g_strcmp0(property, "Strength")) {
+        netregStrength = g_value_get_uint(value);
+    }
+    else if (!g_strcmp0(property, "CellId")) {
+        netregCID = g_value_get_uint(value);
+    }
+    else if (!g_strcmp0(property, "LocationAreaCode")) {
+        netregLAC = g_value_get_uint(value);
+    }
+    else if (!g_strcmp0(property, "Status")) {
+        const gchar *status = g_value_peek_pointer(value);
+        if (!g_strcmp0(status, "searching")) {
+            netregStatus = 2; // Not registered, but MT is currently searching
+        }
+        else if (!g_strcmp0(status, "registered")) {
+            netregStatus = 1;
+        }
+        else {
+            netregStatus = 0; // Not registered, not searching
+            netregMCC[0] = 0;
+            netregMNC[0] = 0;
+        }
+        sendNetworkStateChanged();
+    }
+    else if (!g_strcmp0(property, "Name")) {
+        asprintf(&netregOperator, "%s",
+                 (const char*) g_strdup_value_contents(value));
+    }
+    else if (!g_strcmp0(property, "MobileNetworkCode")) {
+        snprintf(netregMNC, sizeof(netregMNC), "%s",
+                 (const char*) g_value_peek_pointer(value));
+    }
+    else if (!g_strcmp0(property, "MobileCountryCode")) {
+        snprintf(netregMCC, sizeof(netregMCC), "%s",
+                 (const char*) g_value_peek_pointer(value));
+    }
+
     g_value_unset(value);
 }
 
@@ -1501,14 +1585,12 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
     GError *error = NULL;
 
     if (g_strcmp0(property, "Online") == 0) {
-        //setRadioState()
         vcm = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, "org.ofono.VoiceCallManager");
         if (vcm) {
             dbus_g_proxy_add_signal(vcm, OFONO_SIGNAL_PROPERTY_CHANGED, G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
             dbus_g_proxy_connect_signal(vcm,
                                         OFONO_SIGNAL_PROPERTY_CHANGED,
                                         G_CALLBACK(vcm_property_changed), vcm, NULL);
-            setRadioState(RADIO_STATE_SIM_READY);
         }
         else
             LOGE("Failed to create VCM proxy object: %s", error->message);
@@ -1527,7 +1609,6 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                                                 OFONO_SIGNAL_PROPERTY_CHANGED,
                                                 G_CALLBACK(sim_property_changed), sim, NULL);
                     LOGW("Sim proxy created");
-                    //setRadioState (RADIO_STATE_SIM_READY);
                 }
                 else
                     LOGE("Failed to create SIM proxy object: %s", error->message);
@@ -1539,6 +1620,7 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                 g_value_set_boolean(&value, TRUE);
                 obj_set_property(modem, "Online", &value);
                 goingOnline = 1;
+                setRadioState(RADIO_STATE_SIM_READY);
             }
             else if (!netreg && !g_strcmp0(*ifArr, OFONO_IFACE_NETREG)) {
                 netreg = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_NETREG);

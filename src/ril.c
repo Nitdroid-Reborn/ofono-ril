@@ -539,12 +539,15 @@ static void requestHangup(void *data, size_t datalen, RIL_Token t)
 
 static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 {
-    static RIL_SignalStrength st;
+    RIL_SignalStrength st;
 
     st.GW_SignalStrength.signalStrength = 20;
     st.GW_SignalStrength.bitErrorRate = 0;
 
-    RIL_onRequestComplete(t, RIL_E_SUCCESS, &st, sizeof(st));
+    if (t)
+        RIL_onRequestComplete(t, RIL_E_SUCCESS, &st, sizeof(st));
+    else
+        RIL_onUnsolicitedResponse(RIL_UNSOL_SIGNAL_STRENGTH, &st, sizeof(st));
 }
 
 static void requestGPRSRegistrationState(int request, void *data,
@@ -1523,6 +1526,7 @@ static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
 
     if (!g_strcmp0(property, "Strength")) {
         netregStrength = g_value_get_uint(value);
+        requestSignalStrength(0, 0, 0);
     }
     else if (!g_strcmp0(property, "CellId")) {
         netregCID = g_value_get_uint(value);

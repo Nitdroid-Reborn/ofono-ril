@@ -87,6 +87,7 @@ static GMainLoop *loop;
 static DBusGConnection *connection;
 static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *sms;
 static int goingOnline = 0;
+static gboolean screenState = TRUE;
 
 static int netregStatus = 0; // Not registered
 static unsigned int netregLAC, netregCID, netregStrength;
@@ -1019,6 +1020,10 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             }
             break;
 
+        case RIL_REQUEST_SCREEN_STATE:
+            screenState = (*((int *)data) == 1) ? TRUE : FALSE;
+            RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+            break;
         case RIL_REQUEST_SIGNAL_STRENGTH:
             requestSignalStrength(data, datalen, t);
             break;
@@ -1519,12 +1524,14 @@ static void sms_property_changed(DBusGProxy *proxy, const gchar *property,
 static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
                                     GValue *value, gpointer user_data)
 {
-    // XXX
-    LOGW("netreg_property_changed %s->%s", property, g_strdup_value_contents(value));
-
     if (!g_strcmp0(property, "Strength")) {
+        //LOGD("Strength: %u, screenState=%d", g_value_get_uint(value), screenState);
+        if (!screenState)
+            return;
         netregStrength = g_value_get_uint(value);
         requestSignalStrength(0, 0, 0);
+        g_value_unset(value);
+        return;
     }
     else if (!g_strcmp0(property, "CellId")) {
         netregCID = g_value_get_uint(value);
@@ -1545,7 +1552,6 @@ static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
             netregMCC[0] = 0;
             netregMNC[0] = 0;
         }
-        sendNetworkStateChanged();
     }
     else if (!g_strcmp0(property, "Name")) {
         asprintf(&netregOperator, "%s",
@@ -1560,6 +1566,9 @@ static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
                  (const char*) g_value_peek_pointer(value));
     }
 
+    // XXX
+    LOGW("netreg_property_changed %s->%s", property, g_strdup_value_contents(value));
+    sendNetworkStateChanged();
     g_value_unset(value);
 }
 

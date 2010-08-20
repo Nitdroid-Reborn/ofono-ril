@@ -550,8 +550,7 @@ static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
         RIL_onUnsolicitedResponse(RIL_UNSOL_SIGNAL_STRENGTH, &st, sizeof(st));
 }
 
-static void requestGPRSRegistrationState(int request, void *data,
-                                         size_t datalen, RIL_Token t)
+static void requestGPRSRegistrationState(void *data, size_t datalen, RIL_Token t)
 {
     char *responseStr[4];
     memset(responseStr, sizeof(responseStr), 0);
@@ -572,8 +571,7 @@ static void requestGPRSRegistrationState(int request, void *data,
     }
 }
 
-static void requestRegistrationState(int request, void *data,
-                                     size_t datalen, RIL_Token t)
+static void requestRegistrationState(void *data, size_t datalen, RIL_Token t)
 {
     static char *responseStr[14];
     memset(responseStr, sizeof(responseStr), 0);
@@ -1025,10 +1023,10 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             requestSignalStrength(data, datalen, t);
             break;
         case RIL_REQUEST_REGISTRATION_STATE:
-            requestRegistrationState(request, data, datalen, t);
+            requestRegistrationState(data, datalen, t);
             break;
         case RIL_REQUEST_GPRS_REGISTRATION_STATE:
-            requestGPRSRegistrationState(request, data, datalen, t);
+            requestGPRSRegistrationState(data, datalen, t);
             break;
         case RIL_REQUEST_OPERATOR:
             requestOperator(data, datalen, t);

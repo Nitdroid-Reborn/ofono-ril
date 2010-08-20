@@ -80,11 +80,12 @@ const gchar OFONO_SERVICE[] = "org.ofono";
 const gchar OFONO_IFACE_CALL[] = "org.ofono.VoiceCall";
 const gchar OFONO_IFACE_SIMMANAGER[] = "org.ofono.SimManager";
 const gchar OFONO_IFACE_NETREG[] = "org.ofono.NetworkRegistration";
+const gchar OFONO_IFACE_SMSMAN[] = "org.ofono.SmsManager";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
 
 static GMainLoop *loop;
 static DBusGConnection *connection;
-static DBusGProxy *manager, *modem, *vcm, *sim, *netreg;
+static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *sms;
 static int goingOnline = 0;
 
 static int netregStatus = 0; // Not registered
@@ -605,43 +606,19 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 
 static void requestSendSMS(void *data, size_t datalen, RIL_Token t)
 {
-#if 0
-    int err;
     const char *smsc;
     const char *pdu;
-    int tpLayerLength;
-    char *cmd1, *cmd2;
     RIL_SMS_Response response;
-    ATResponse *p_response = NULL;
 
     smsc = ((const char **)data)[0];
     pdu = ((const char **)data)[1];
 
-    tpLayerLength = strlen(pdu)/2;
-
-    // "NULL for default SMSC"
-    if (smsc == NULL) {
-        smsc= "00";
-    }
-
-    asprintf(&cmd1, "AT+CMGS=%d", tpLayerLength);
-    asprintf(&cmd2, "%s%s", smsc, pdu);
-
-    err = at_send_command_sms(cmd1, cmd2, "+CMGS:", &p_response);
-
-    if (err != 0 || p_response->success == 0) goto error;
+    LOGD("requestSendSMS, %s, %s", smsc, pdu);
 
     memset(&response, 0, sizeof(response));
 
     /* FIXME fill in messageRef and ackPDU */
-
     RIL_onRequestComplete(t, RIL_E_SUCCESS, &response, sizeof(response));
-    at_response_free(p_response);
-
-    return;
-error:
-#endif
-    RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
 static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
@@ -1530,6 +1507,14 @@ static void sim_property_changed(DBusGProxy *proxy, const gchar *property,
     g_value_unset(value);
 }
 
+static void sms_property_changed(DBusGProxy *proxy, const gchar *property,
+                                 GValue *value, gpointer user_data)
+{
+    // XXX
+    LOGW("sms_property_changed %s->%s", property, g_strdup_value_contents(value));
+    g_value_unset(value);
+}
+
 static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
                                     GValue *value, gpointer user_data)
 {
@@ -1633,7 +1618,20 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                     LOGW("NetReg proxy created");
                 }
                 else
-                    LOGE("Failed to create SIM proxy object: %s", error->message);
+                    LOGE("Failed to create NetReg proxy object: %s", error->message);
+            }
+            else if (!sms && !g_strcmp0(*ifArr, OFONO_IFACE_SMSMAN)) {
+                sms = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_SMSMAN);
+                if (sms) {
+                    dbus_g_proxy_add_signal(sms, OFONO_SIGNAL_PROPERTY_CHANGED,
+                                            G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+                    dbus_g_proxy_connect_signal(sms,
+                                                OFONO_SIGNAL_PROPERTY_CHANGED,
+                                                G_CALLBACK(sms_property_changed), sms, NULL);
+                    LOGW("SmsManager proxy created");
+                }
+                else
+                    LOGE("Failed to create SmsMan proxy object: %s", error->message);
             }
             ifArr++;
         }

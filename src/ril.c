@@ -75,14 +75,24 @@ static const RIL_RadioFunctions s_callbacks = {
     getVersion
 };
 
+typedef struct {
+    int             index;
+    DBusGProxy      *obj;
+    const gchar     *number;
+    gboolean        isIncomingCall;
+} ORIL_Call;
+
 const gchar MODEM[] = "/isimodem";
 const gchar OFONO_SERVICE[] = "org.ofono";
 const gchar OFONO_IFACE_CALL[] = "org.ofono.VoiceCall";
+const gchar OFONO_IFACE_CALLMAN[] = "org.ofono.VoiceCallManager";
 const gchar OFONO_IFACE_SIMMANAGER[] = "org.ofono.SimManager";
 const gchar OFONO_IFACE_NETREG[] = "org.ofono.NetworkRegistration";
 const gchar OFONO_IFACE_SMSMAN[] = "org.ofono.SmsManager";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
+const gchar OFONO_SIGNAL_DISCONNECT_REASON[] = "DisconnectReason";
 
+static ORIL_Call orCalls[8];
 static GMainLoop *loop;
 static DBusGConnection *connection;
 static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *sms;
@@ -1471,6 +1481,12 @@ static void call_property_changed(DBusGProxy *proxy, const gchar *property,
     g_value_unset(value);
 }
 
+static void call_disconnect_reason(DBusGProxy *proxy, const gchar *reason,
+                                   gpointer user_data)
+{
+    LOGW("call_disconnect_reason: %s", reason);
+}
+
 static void vcm_property_changed(DBusGProxy *proxy, const gchar *property,
                                  GValue *value, gpointer user_data)
 {
@@ -1482,28 +1498,19 @@ static void vcm_property_changed(DBusGProxy *proxy, const gchar *property,
         if (!callArr->len) {
             LOGD("Calls is empty. Disconnected?");
             g_value_unset(value);
-            RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
-                                      NULL, 0);
-            return;
         }
-
+        RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
+                                  NULL, 0);
+#if 0
         const char *callPath = g_ptr_array_index(callArr, 0);
         LOGD("Call: %s\n", callPath);
 
         // new call
         GError *error = NULL;
-        DBusGProxy *call = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, callPath, OFONO_IFACE_CALL);
-        if (call) {
-            dbus_g_proxy_add_signal(call, OFONO_SIGNAL_PROPERTY_CHANGED,
-                                    G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
-            dbus_g_proxy_connect_signal(call,
-                                        OFONO_SIGNAL_PROPERTY_CHANGED,
-                                        G_CALLBACK(call_property_changed), vcm, NULL);
-            RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
-                                      NULL, 0);
-        }
+ 
         else
             LOGE("Failed to create Call proxy object: %s", error->message);
+#endif
     }
     g_value_unset(value);
 }
@@ -1575,6 +1582,41 @@ static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
     g_value_unset(value);
 }
 
+static void initVoiceCallInterfaces()
+{
+    GError *error = NULL;
+    vcm = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, "org.ofono.VoiceCallManager");
+    if (vcm) {
+        dbus_g_proxy_add_signal(vcm, OFONO_SIGNAL_PROPERTY_CHANGED, G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+        dbus_g_proxy_connect_signal(vcm,
+                                    OFONO_SIGNAL_PROPERTY_CHANGED,
+                                    G_CALLBACK(vcm_property_changed), vcm, NULL);
+    }
+    else
+        LOGE("Failed to create VCM proxy object: %s", error->message);
+
+    for(unsigned i = 0; i < 8; i++) {
+        char callPath[50];
+        snprintf(callPath, sizeof(callPath), "%s/voicecall%02u", MODEM, i);
+        DBusGProxy *call = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, callPath, OFONO_IFACE_CALL);
+        if (call) {
+            // signal PropertyChanged(string property, variant value)
+            dbus_g_proxy_add_signal(call, OFONO_SIGNAL_PROPERTY_CHANGED,
+                                    G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+            dbus_g_proxy_connect_signal(call,
+                                        OFONO_SIGNAL_PROPERTY_CHANGED,
+                                        G_CALLBACK(call_property_changed), (void*)i, NULL);
+            // signal DisconnectReason(string reason)
+            dbus_g_proxy_add_signal(call, OFONO_SIGNAL_DISCONNECT_REASON,
+                                    G_TYPE_STRING, G_TYPE_INVALID);
+            dbus_g_proxy_connect_signal(call,
+                                        OFONO_SIGNAL_DISCONNECT_REASON,
+                                        G_CALLBACK(call_disconnect_reason), (void*)i, NULL);
+        }
+        orCalls[i].index = i;
+        orCalls[i].obj = call;
+    }
+}
 
 static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                                    GValue *value, gpointer user_data)
@@ -1583,23 +1625,19 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
     LOGD("modem_property_changed: %s->%s", property, g_strdup_value_contents(value));
     GError *error = NULL;
 
-    if (g_strcmp0(property, "Online") == 0) {
-        vcm = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, "org.ofono.VoiceCallManager");
-        if (vcm) {
-            dbus_g_proxy_add_signal(vcm, OFONO_SIGNAL_PROPERTY_CHANGED, G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
-            dbus_g_proxy_connect_signal(vcm,
-                                        OFONO_SIGNAL_PROPERTY_CHANGED,
-                                        G_CALLBACK(vcm_property_changed), vcm, NULL);
-        }
-        else
-            LOGE("Failed to create VCM proxy object: %s", error->message);
+    if (!vcm && g_strcmp0(property, "Online") == 0) {
+        LOGD("Modem->Onlne: %s", g_value_get_boolean(value) ? "true" : "false");
+        //TODO: what?
     }
     else if (g_strcmp0(property, "Interfaces") == 0) {
         const gchar **ifArr = g_value_peek_pointer(value);
         LOGD("Interfaces:");
         while(*ifArr) {
             LOGD("  >> %s", *ifArr);
-            if (!sim && !g_strcmp0(*ifArr, OFONO_IFACE_SIMMANAGER)) {
+            if (!vcm && !g_strcmp0(*ifArr, OFONO_IFACE_CALLMAN)) {
+                initVoiceCallInterfaces();
+            }
+            else if (!sim && !g_strcmp0(*ifArr, OFONO_IFACE_SIMMANAGER)) {
                 sim = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_SIMMANAGER);
                 if (sim) {
                     dbus_g_proxy_add_signal(sim, OFONO_SIGNAL_PROPERTY_CHANGED,

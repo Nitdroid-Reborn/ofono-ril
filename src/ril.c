@@ -1437,7 +1437,7 @@ mainLoop(void *param)
 
     // Give initializeCallback a chance to dispatched, since
     // we don't presently have a cancellation mechanism
-    sleep(1);
+    //sleep(1);
 
     //GMainLoop *event_loop = g_main_loop_new(NULL, FALSE);
     LOGD("Running main loop");
@@ -1659,6 +1659,9 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
 
 static int initOfono()
 {
+    // give a chance to ofonod for settling
+    sleep(1);
+
     GError *error = NULL;
     connection = dbus_g_bus_get(DBUS_BUS_SYSTEM, &error);
     if (!connection) {

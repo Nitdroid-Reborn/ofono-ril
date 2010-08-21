@@ -385,7 +385,10 @@ static int call_to_rilcall(const gchar *callPath, RIL_Call *rilCall)
     rilCall->toa = 145;
     rilCall->isVoice = 1;
     rilCall->number = (char*)id; // XXX
-    rilCall->name = "Elvis";
+    /* Presentation: 0=Allowed, 1=Restricted, 2=Not Specified/Unknown 3=Payphone */
+    rilCall->namePresentation = 2;
+    if (!id || !strlen(id))
+        rilCall->numberPresentation = 2;
 
     return 1;
 }

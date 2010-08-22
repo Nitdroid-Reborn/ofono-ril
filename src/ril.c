@@ -78,8 +78,9 @@ static const RIL_RadioFunctions s_callbacks = {
 typedef struct {
     int             index;
     DBusGProxy      *obj;
-    const gchar     *number;
-    gboolean        isIncomingCall;
+    RIL_Call        rilCall;
+    char            number[30];
+    char            objPath[50];
 } ORIL_Call;
 
 const gchar MODEM[] = "/isimodem";
@@ -98,6 +99,7 @@ static DBusGConnection *connection;
 static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *sms;
 static int goingOnline = 0;
 static gboolean screenState = TRUE;
+static int lastCallFailCause;
 
 static int netregStatus = 0; // Not registered
 static unsigned int netregLAC, netregCID, netregStrength;
@@ -371,35 +373,50 @@ static void call_answer(const gchar *callPath, int answerOrHangup)
         LOGE("Failed to create Call proxy object: %s", error->message);
 }
 
-static int call_to_rilcall(const gchar *callPath, RIL_Call *rilCall)
+static inline int call_to_rilcall(int index)
 {
-    LOGD("call_to_rilcall(\"%s\", %p)", callPath, rilCall);
+    //LOGD("call_to_rilcall(%d)", index);
 
-    GHashTable *dict = name_get_properties(callPath, OFONO_IFACE_CALL);
+    GHashTable *dict = name_get_properties(orCalls[index].objPath, OFONO_IFACE_CALL);
     if (!dict)
         return 0;
 
     GValue *valueState = (GValue *) g_hash_table_lookup(dict, "State");
-    const gchar *state = g_value_peek_pointer(valueState);
-    
+    orCalls[index].rilCall.state = ofonoStateToRILState(g_value_peek_pointer(valueState));
+    g_value_unset(valueState);
+
+#if 1
+    if (RIL_CALL_INCOMING == orCalls[index].rilCall.state ||
+        RIL_CALL_WAITING == orCalls[index].rilCall.state)
+        orCalls[index].rilCall.isMT = 1;
+    else if (RIL_CALL_DIALING == orCalls[index].rilCall.state ||
+             RIL_CALL_ALERTING == orCalls[index].rilCall.state)
+             orCalls[index].rilCall.isMT = 0;
+#endif
+
     GValue *valueId = (GValue *) g_hash_table_lookup(dict, "LineIdentification");
-    const gchar *id = g_value_peek_pointer(valueId);
+    const char *id = g_value_peek_pointer(valueId);
+    strncpy(orCalls[index].number, id ? id : "", sizeof(orCalls[index].number));
+    g_value_unset(valueId);
     
-    LOGD("Call state: %s, LineIdentification: %s", state, id);
-    RIL_CallState rilState = ofonoStateToRILState(state);
-    if (rilState == 0xffffffff)
+    LOGD("Call state: %u, LineIdentification: %s, MT: %d",
+         orCalls[index].rilCall.state,
+         orCalls[index].number,
+         orCalls[index].rilCall.isMT);
+
+    if (orCalls[index].rilCall.state == 0xffffffff)
         return 0;
 
-    rilCall->state = rilState;
-    rilCall->index = 1;
-    rilCall->toa = 145;
-    rilCall->isVoice = 1;
-    rilCall->number = (char*)id; // XXX
-    /* Presentation: 0=Allowed, 1=Restricted, 2=Not Specified/Unknown 3=Payphone */
-    rilCall->namePresentation = 2;
-    if (!id || !strlen(id))
-        rilCall->numberPresentation = 2;
+    orCalls[index].rilCall.index = index + 1;
+    orCalls[index].rilCall.toa = 145;
+    orCalls[index].rilCall.isVoice = 1;
+    orCalls[index].rilCall.number = orCalls[index].number;
 
+    /* Presentation: 0=Allowed, 1=Restricted, 2=Not Specified/Unknown 3=Payphone */
+    orCalls[index].rilCall.namePresentation = 2;
+    orCalls[index].rilCall.numberPresentation = strlen(orCalls[index].number) ? 0 : 2;
+
+    LOGD("+ %d (%s), presentation: %d", index, orCalls[index].objPath, orCalls[index].rilCall.numberPresentation);
     return 1;
 }
 
@@ -459,14 +476,15 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
     /* yes, there's an array of pointers and then an array of structures */
 
     pp_calls = (RIL_Call **)alloca(countCalls * sizeof(RIL_Call *));
-    p_calls = (RIL_Call *)alloca(countCalls * sizeof(RIL_Call));
-    memset (p_calls, 0, countCalls * sizeof(RIL_Call));
+    //p_calls = (RIL_Call *)alloca(countCalls * sizeof(RIL_Call));
+    //memset (p_calls, 0, countCalls * sizeof(RIL_Call));
 
     /* init the pointer array */
-    for(i = 0; i < countCalls ; i++) {
-        pp_calls[validCalls] = &(p_calls[validCalls]);
-        if (call_to_rilcall(g_ptr_array_index(callsArr, i), &(p_calls[validCalls])))
+    for(i = 0; i < 8 ; i++) {
+        pp_calls[validCalls] = &orCalls[i].rilCall;
+        if (call_to_rilcall(/*g_ptr_array_index(callsArr, i)*/ i/*, &(p_calls[validCalls])*/)) {
             ++validCalls;
+        }
     }
 
     LOGD("countCalls/validCalls: %d/%d", countCalls, validCalls);
@@ -1468,14 +1486,16 @@ static int setProperty(DBusGProxy *proxy, const gchar *property, GValue *value)
 static void call_property_changed(DBusGProxy *proxy, const gchar *property,
                                    GValue *value, gpointer user_data)
 {
-    // XXX
-    LOGE("call_property_changed: %s->%s", property, g_strdup_value_contents(value));
-    if (g_strcmp0(property, "State")) {
-        if (g_strcmp0("disconnected", g_value_peek_pointer(value))) {
-            LOGD("Call->disconnected");
-        }
-        RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
-                                  NULL, 0);
+    int callIndex = (int) user_data;
+    LOGE("call_property_changed(%d): %s->%s", callIndex, property, (char*)g_value_peek_pointer(value));
+
+    if (!g_strcmp0(property, "State")) {
+        orCalls[callIndex].rilCall.state = ofonoStateToRILState(g_value_peek_pointer(value));
+
+        // for disconnected calls we'll send it on vcm->OnStateChange("Calls") signal
+        if (0xffffffff != (unsigned int)orCalls[callIndex].rilCall.state)
+            RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
+                                      NULL, 0);
     }
 
     g_value_unset(value);
@@ -1497,20 +1517,10 @@ static void vcm_property_changed(DBusGProxy *proxy, const gchar *property,
         GPtrArray *callArr = g_value_peek_pointer(value);
         if (!callArr->len) {
             LOGD("Calls is empty. Disconnected?");
-            g_value_unset(value);
         }
+
         RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
                                   NULL, 0);
-#if 0
-        const char *callPath = g_ptr_array_index(callArr, 0);
-        LOGD("Call: %s\n", callPath);
-
-        // new call
-        GError *error = NULL;
- 
-        else
-            LOGE("Failed to create Call proxy object: %s", error->message);
-#endif
     }
     g_value_unset(value);
 }
@@ -1596,9 +1606,8 @@ static void initVoiceCallInterfaces()
         LOGE("Failed to create VCM proxy object: %s", error->message);
 
     for(unsigned i = 0; i < 8; i++) {
-        char callPath[50];
-        snprintf(callPath, sizeof(callPath), "%s/voicecall%02u", MODEM, i);
-        DBusGProxy *call = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, callPath, OFONO_IFACE_CALL);
+        snprintf(orCalls[i].objPath, sizeof(orCalls[i].objPath), "%s/voicecall%02u", MODEM, i + 1);
+        DBusGProxy *call = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, orCalls[i].objPath, OFONO_IFACE_CALL);
         if (call) {
             // signal PropertyChanged(string property, variant value)
             dbus_g_proxy_add_signal(call, OFONO_SIGNAL_PROPERTY_CHANGED,
@@ -1615,6 +1624,7 @@ static void initVoiceCallInterfaces()
         }
         orCalls[i].index = i;
         orCalls[i].obj = call;
+        orCalls[i].rilCall.state = (RIL_CallState) 0xffffffff;
     }
 }
 

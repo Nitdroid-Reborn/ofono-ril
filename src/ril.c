@@ -51,6 +51,7 @@ typedef enum {
     SIM_NETWORK_PERSONALIZATION = 5
 } SIM_Status;
 
+static GHashTable* iface_get_properties(DBusGProxy *proxy);
 static GHashTable* name_get_properties(const gchar *objPath, const gchar *ifaceName);
 
 static void onRequest (int request, void *data, size_t datalen, RIL_Token t);
@@ -90,22 +91,28 @@ const gchar OFONO_IFACE_CALLMAN[] = "org.ofono.VoiceCallManager";
 const gchar OFONO_IFACE_SIMMANAGER[] = "org.ofono.SimManager";
 const gchar OFONO_IFACE_NETREG[] = "org.ofono.NetworkRegistration";
 const gchar OFONO_IFACE_SMSMAN[] = "org.ofono.SmsManager";
+const gchar OFONO_IFACE_CONNMAN[] = "org.ofono.DataConnectionManager";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
 const gchar OFONO_SIGNAL_DISCONNECT_REASON[] = "DisconnectReason";
 
 static ORIL_Call orCalls[8];
 static GMainLoop *loop;
 static DBusGConnection *connection;
-static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *sms;
+static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *sms, *connman;
 static int goingOnline = 0;
 static gboolean screenState = TRUE;
 static int lastCallFailCause;
+static char simIMSI[16];
 
+/* Network Registratior */
 static int netregStatus = 0; // Not registered
 static unsigned int netregLAC, netregCID, netregStrength;
 
 static char *netregOperator = 0;
 static char netregMCC[4], netregMNC[4];
+
+/* DataConnectionManager */
+static gboolean connmanAttached = FALSE;
 
 #ifdef RIL_SHLIB
 static const struct RIL_Env *s_rilenv;
@@ -310,40 +317,8 @@ static void requestOrSendDataCallList(RIL_Token *t)
 static void requestQueryNetworkSelectionMode(
     void *data, size_t datalen, RIL_Token t)
 {
-#if 0
-    int err;
-    ATResponse *p_response = NULL;
     int response = 0;
-    char *line;
-
-    err = at_send_command_singleline("AT+COPS?", "+COPS:", &p_response);
-
-    if (err < 0 || p_response->success == 0) {
-        goto error;
-    }
-
-    line = p_response->p_intermediates->line;
-
-    err = at_tok_start(&line);
-
-    if (err < 0) {
-        goto error;
-    }
-
-    err = at_tok_nextint(&line, &response);
-
-    if (err < 0) {
-        goto error;
-    }
-
     RIL_onRequestComplete(t, RIL_E_SUCCESS, &response, sizeof(int));
-    at_response_free(p_response);
-    return;
-error:
-    at_response_free(p_response);
-    LOGE("requestQueryNetworkSelectionMode must never return error when radio is on");
-#endif
-    RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
 static void sendCallStateChanged(void *param)
@@ -377,7 +352,7 @@ static inline int call_to_rilcall(int index)
 {
     //LOGD("call_to_rilcall(%d)", index);
 
-    GHashTable *dict = name_get_properties(orCalls[index].objPath, OFONO_IFACE_CALL);
+    GHashTable *dict = iface_get_properties(orCalls[index].obj);
     if (!dict)
         return 0;
 
@@ -594,7 +569,7 @@ static void requestGPRSRegistrationState(void *data, size_t datalen, RIL_Token t
             asprintf(&responseStr[0], "%d", netregStatus);
             asprintf(&responseStr[1], "%x", netregLAC);
             asprintf(&responseStr[2], "%x", netregCID);
-            asprintf(&responseStr[3], "%d", 2); // Technology: EDGE
+            asprintf(&responseStr[3], "%d", connmanAttached ? 2 : 1); // Technology ? EDGE : unknown
             LOGD("requestGPRSRegistrationState success");
             RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, sizeof(responseStr));
             break;
@@ -612,7 +587,7 @@ static void requestRegistrationState(void *data, size_t datalen, RIL_Token t)
         asprintf(&responseStr[0], "%d", netregStatus);
         asprintf(&responseStr[1], "%x", netregLAC);
         asprintf(&responseStr[2], "%x", netregCID);
-        asprintf(&responseStr[3], "%d", 2); // Technology: EDGE
+        asprintf(&responseStr[3], "%d", connmanAttached ? 2 : 1); // Technology: EDGE
         LOGD("requestRegistrationState success");
         RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, sizeof(responseStr));
     }
@@ -1090,7 +1065,8 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             break;
 
         case RIL_REQUEST_GET_IMSI:
-            RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+            RIL_onRequestComplete(t, RIL_E_SUCCESS,
+                                  simIMSI, sizeof(char *));
             break;
         case RIL_REQUEST_GET_IMEI:
             RIL_onRequestComplete(t, RIL_E_SUCCESS,
@@ -1541,6 +1517,19 @@ static void sms_property_changed(DBusGProxy *proxy, const gchar *property,
     g_value_unset(value);
 }
 
+static void connman_property_changed(DBusGProxy *proxy, const gchar *property,
+                                     GValue *value, gpointer user_data)
+{
+    // XXX
+    LOGW("connman_property_changed %s->%s", property, g_strdup_value_contents(value));
+
+    if (!g_strcmp0(property, "Attached")) {
+        connmanAttached = g_value_get_boolean(value);
+        sendNetworkStateChanged();
+    }
+    g_value_unset(value);
+}
+
 static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
                                     GValue *value, gpointer user_data)
 {
@@ -1594,7 +1583,6 @@ static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
 
 static void initVoiceCallInterfaces()
 {
-    GError *error = NULL;
     vcm = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, "org.ofono.VoiceCallManager");
     if (vcm) {
         dbus_g_proxy_add_signal(vcm, OFONO_SIGNAL_PROPERTY_CHANGED, G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
@@ -1603,7 +1591,7 @@ static void initVoiceCallInterfaces()
                                     G_CALLBACK(vcm_property_changed), vcm, NULL);
     }
     else
-        LOGE("Failed to create VCM proxy object: %s", error->message);
+        LOGE("Failed to create VCM proxy object");
 
     for(unsigned i = 0; i < 8; i++) {
         snprintf(orCalls[i].objPath, sizeof(orCalls[i].objPath), "%s/voicecall%02u", MODEM, i + 1);
@@ -1628,12 +1616,39 @@ static void initVoiceCallInterfaces()
     }
 }
 
+static void initSimInterface()
+{
+    sim = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_SIMMANAGER);
+    if (sim) {
+        dbus_g_proxy_add_signal(sim, OFONO_SIGNAL_PROPERTY_CHANGED,
+                                G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+        dbus_g_proxy_connect_signal(sim,
+                                    OFONO_SIGNAL_PROPERTY_CHANGED,
+                                    G_CALLBACK(sim_property_changed), sim, NULL);
+        LOGW("Sim proxy created");
+
+        // Read IMSI
+        GHashTable *dict = iface_get_properties(sim);
+        if (dict) {
+            GValue *value = (GValue *) g_hash_table_lookup(dict, "SubscriberIdentity");
+            if (value) {
+                strncpy(simIMSI, g_value_peek_pointer(value), sizeof(simIMSI));
+                LOGD("Got IMSI: %6sXXXX", simIMSI);
+                g_value_unset(value);
+            }
+            else
+                LOGE("No SubscriberIdentity!");
+        }
+    }
+    else
+        LOGE("Failed to create SIM proxy object");
+}
+
 static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                                    GValue *value, gpointer user_data)
 {
     // XXX
     LOGD("modem_property_changed: %s->%s", property, g_strdup_value_contents(value));
-    GError *error = NULL;
 
     if (!vcm && g_strcmp0(property, "Online") == 0) {
         LOGD("Modem->Onlne: %s", g_value_get_boolean(value) ? "true" : "false");
@@ -1648,17 +1663,7 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                 initVoiceCallInterfaces();
             }
             else if (!sim && !g_strcmp0(*ifArr, OFONO_IFACE_SIMMANAGER)) {
-                sim = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_SIMMANAGER);
-                if (sim) {
-                    dbus_g_proxy_add_signal(sim, OFONO_SIGNAL_PROPERTY_CHANGED,
-                                            G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
-                    dbus_g_proxy_connect_signal(sim,
-                                                OFONO_SIGNAL_PROPERTY_CHANGED,
-                                                G_CALLBACK(sim_property_changed), sim, NULL);
-                    LOGW("Sim proxy created");
-                }
-                else
-                    LOGE("Failed to create SIM proxy object: %s", error->message);
+                initSimInterface();
             }
             else if (!goingOnline && !g_strcmp0(*ifArr, "org.ofono.Phonebook")) {
                 LOGW("Phonebook is created, going online");
@@ -1680,7 +1685,7 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                     LOGW("NetReg proxy created");
                 }
                 else
-                    LOGE("Failed to create NetReg proxy object: %s", error->message);
+                    LOGE("Failed to create NetReg proxy object");
             }
             else if (!sms && !g_strcmp0(*ifArr, OFONO_IFACE_SMSMAN)) {
                 sms = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_SMSMAN);
@@ -1693,7 +1698,20 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                     LOGW("SmsManager proxy created");
                 }
                 else
-                    LOGE("Failed to create SmsMan proxy object: %s", error->message);
+                    LOGE("Failed to create SmsMan proxy object");
+            }
+            else if (!connman && !g_strcmp0(*ifArr, OFONO_IFACE_CONNMAN)) {
+                connman = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_CONNMAN);
+                if (connman) {
+                    dbus_g_proxy_add_signal(connman, OFONO_SIGNAL_PROPERTY_CHANGED,
+                                            G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+                    dbus_g_proxy_connect_signal(connman,
+                                                OFONO_SIGNAL_PROPERTY_CHANGED,
+                                                G_CALLBACK(connman_property_changed), connman, NULL);
+                    LOGW("DataConnectionManager proxy created");
+                }
+                else
+                    LOGE("Failed to create DataConnectionManager proxy object");
             }
             ifArr++;
         }

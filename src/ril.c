@@ -564,9 +564,8 @@ static void requestGPRSRegistrationState(void *data, size_t datalen, RIL_Token t
 
     switch(netregStatus) {
         case 1:
-        case 2:
         case 5:
-            asprintf(&responseStr[0], "%d", netregStatus);
+            asprintf(&responseStr[0], "%d", connmanAttached ? 1 : 0);
             asprintf(&responseStr[1], "%x", netregLAC);
             asprintf(&responseStr[2], "%x", netregCID);
             asprintf(&responseStr[3], "%d", connmanAttached ? 2 : 1); // Technology ? EDGE : unknown
@@ -631,22 +630,20 @@ static void requestSendSMS(void *data, size_t datalen, RIL_Token t)
 
 static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
 {
+    // we always use only one context for PDC: primarycontext1
+    char *response[2] = { "1", "gprs0" };
+    const char *apn  = ((const char **)data)[2];
+    const char *user = ((const char **)data)[3];
+    const char *pswd = ((const char **)data)[4];
+    const char *auth = ((const char **)data)[5];
+    LOGD("requestSetupDataCall, %s, %s, %s, %s", apn, user, pswd, auth);
+
 #if 0
     const char *apn;
     char *cmd;
     int err;
     ATResponse *p_response = NULL;
-    char *response[2] = { "1", PPP_TTY_PATH };
 
-    apn = ((const char **)data)[2];
-
-#ifdef USE_TI_COMMANDS
-    // Config for multislot class 10 (probably default anyway eh?)
-    err = at_send_command("AT%CPRIM=\"GMM\",\"CONFIG MULTISLOT_CLASS=<10>\"",
-                          NULL);
-
-    err = at_send_command("AT%DATA=2,\"UART\",1,,\"SER\",\"UART\",0", NULL);
-#endif /* USE_TI_COMMANDS */
 
     int fd, qmistatus;
     size_t cur = 0;
@@ -659,25 +656,6 @@ static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
 
     fd = open ("/dev/qmi", O_RDWR);
     if (fd >= 0) { /* the device doesn't exist on the emulator */
-
-        LOGD("opened the qmi device\n");
-        asprintf(&cmd, "up:%s", apn);
-        len = strlen(cmd);
-
-        while (cur < len) {
-            do {
-                written = write (fd, cmd + cur, len - cur);
-            } while (written < 0 && errno == EINTR);
-
-            if (written < 0) {
-                LOGE("### ERROR writing to /dev/qmi");
-                close(fd);
-                goto error;
-            }
-
-            cur += written;
-        }
-
         // wait for interface to come online
 
         do {

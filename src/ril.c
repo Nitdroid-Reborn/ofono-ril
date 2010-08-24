@@ -160,89 +160,6 @@ static RIL_CallState ofonoStateToRILState(const gchar *state)
     return (RIL_CallState) 0xffffffff;
 }
 
-/**
- * Note: directly modified line and has *p_call point directly into
- * modified line
- */
-static int callFromCLCCLine(char *line, RIL_Call *p_call)
-{
-#if 0
-    //+CLCC: 1,0,2,0,0,\"+18005551212\",145
-    //     index,isMT,state,mode,isMpty(,number,TOA)?
-
-    int err;
-    int state;
-    int mode;
-
-    err = at_tok_start(&line);
-    if (err < 0) goto error;
-
-    err = at_tok_nextint(&line, &(p_call->index));
-    if (err < 0) goto error;
-
-    err = at_tok_nextbool(&line, &(p_call->isMT));
-    if (err < 0) goto error;
-
-    err = at_tok_nextint(&line, &state);
-    if (err < 0) goto error;
-
-    err = clccStateToRILState(state, &(p_call->state));
-    if (err < 0) goto error;
-
-    err = at_tok_nextint(&line, &mode);
-    if (err < 0) goto error;
-
-    p_call->isVoice = (mode == 0);
-
-    err = at_tok_nextbool(&line, &(p_call->isMpty));
-    if (err < 0) goto error;
-
-    if (at_tok_hasmore(&line)) {
-        err = at_tok_nextstr(&line, &(p_call->number));
-
-        /* tolerate null here */
-        if (err < 0) return 0;
-
-        // Some lame implementations return strings
-        // like "NOT AVAILABLE" in the CLCC line
-        if (p_call->number != NULL
-            && 0 == strspn(p_call->number, "+0123456789")
-            ) {
-            p_call->number = NULL;
-        }
-
-        err = at_tok_nextint(&line, &p_call->toa);
-        if (err < 0) goto error;
-    }
-
-    p_call->uusInfo = NULL;
-
-    return 0;
-
-error:
-    LOGE("invalid CLCC line\n");
-#endif
-    return -1;
-}
-
-
-/** do post-AT+CFUN=1 initialization */
-static void onRadioPowerOn()
-{
-#ifdef USE_TI_COMMANDS
-    /*  Must be after CFUN=1 */
-    /*  TI specific -- notifications for CPHS things such */
-    /*  as CPHS message waiting indicator */
-
-    at_send_command("AT%CPHS=1", NULL);
-
-    /*  TI specific -- enable NITZ unsol notifs */
-    at_send_command("AT%CTZV=1", NULL);
-#endif
-
-    pollSIMState(NULL);
-}
-
 /** do post- SIM ready initialization */
 static void onSIMReady()
 {
@@ -1255,7 +1172,7 @@ setRadioState(RIL_RadioState newState)
         if (sState == RADIO_STATE_SIM_READY) {
             onSIMReady();
         } else if (sState == RADIO_STATE_SIM_NOT_READY) {
-            onRadioPowerOn();
+            pollSIMState(NULL);
         }
     }
 }
@@ -1358,16 +1275,6 @@ static void pollSIMState (void *param)
     setRadioState(!!sim ? RADIO_STATE_SIM_READY : RADIO_STATE_SIM_NOT_READY);
 }
 
-/**
- * Initialize everything that can be configured while we're still in
- * AT+CFUN=0
- */
-static void initializeCallback(void *param)
-{
-    sleep(3);
-    setRadioState(RADIO_STATE_OFF);
-}
-
 static void waitForClose()
 {
     pthread_mutex_lock(&s_state_mutex);
@@ -1379,98 +1286,9 @@ static void waitForClose()
     pthread_mutex_unlock(&s_state_mutex);
 }
 
-/**
- * Called by atchannel when an unsolicited line appears
- * This is called on atchannel's reader thread. AT commands may
- * not be issued here
- */
-static void onUnsolicited (const char *s, const char *sms_pdu)
-{
-    char *line = NULL;
-    int err;
-
-    /* Ignore unsolicited responses until we're initialized.
-     * This is OK because the RIL library will poll for initial state
-     */
-    if (sState == RADIO_STATE_UNAVAILABLE) {
-        return;
-    }
-
-#if 0
-    if (strStartsWith(s, "%CTZV:")) {
-        /* TI specific -- NITZ time */
-        char *response;
-
-        line = strdup(s);
-        at_tok_start(&line);
-
-        err = at_tok_nextstr(&line, &response);
-
-        if (err != 0) {
-            LOGE("invalid NITZ line %s\n", s);
-        } else {
-            RIL_onUnsolicitedResponse (
-                RIL_UNSOL_NITZ_TIME_RECEIVED,
-                response, strlen(response));
-        }
-    } else if (strStartsWith(s,"+CRING:")
-               || strStartsWith(s,"RING")
-               || strStartsWith(s,"NO CARRIER")
-               || strStartsWith(s,"+CCWA")
-               ) {
-        RIL_onUnsolicitedResponse (
-            RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
-            NULL, 0);
-#ifdef WORKAROUND_FAKE_CGEV
-        RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL); //TODO use new function
-#endif /* WORKAROUND_FAKE_CGEV */
-    } else if (strStartsWith(s,"+CREG:")
-               || strStartsWith(s,"+CGREG:")
-               ) {
-        RIL_onUnsolicitedResponse (
-            RIL_UNSOL_RESPONSE_NETWORK_STATE_CHANGED,
-            NULL, 0);
-#ifdef WORKAROUND_FAKE_CGEV
-        RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL);
-#endif /* WORKAROUND_FAKE_CGEV */
-    } else if (strStartsWith(s, "+CMT:")) {
-        RIL_onUnsolicitedResponse (
-            RIL_UNSOL_RESPONSE_NEW_SMS,
-            sms_pdu, strlen(sms_pdu));
-    } else if (strStartsWith(s, "+CDS:")) {
-        RIL_onUnsolicitedResponse (
-            RIL_UNSOL_RESPONSE_NEW_SMS_STATUS_REPORT,
-            sms_pdu, strlen(sms_pdu));
-    } else if (strStartsWith(s, "+CGEV:")) {
-        /* Really, we can ignore NW CLASS and ME CLASS events here,
-         * but right now we don't since extranous
-         * RIL_UNSOL_DATA_CALL_LIST_CHANGED calls are tolerated
-         */
-        /* can't issue AT commands here -- call on main thread */
-        RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL);
-#ifdef WORKAROUND_FAKE_CGEV
-    } else if (strStartsWith(s, "+CME ERROR: 150")) {
-        RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL);
-#endif /* WORKAROUND_FAKE_CGEV */
-    }
-#endif // 0
-}
-
-//static int
-
 static void *
 mainLoop(void *param)
 {
-    int fd;
-    int ret;
-
-    RIL_requestTimedCallback(initializeCallback, NULL, &TIMEVAL_0);
-
-    // Give initializeCallback a chance to dispatched, since
-    // we don't presently have a cancellation mechanism
-    //sleep(1);
-
-    //GMainLoop *event_loop = g_main_loop_new(NULL, FALSE);
     LOGD("Running main loop");
     g_main_loop_run(loop);
     LOGD("Main loop ended");
@@ -1866,15 +1684,10 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
                                       G_TYPE_INVALID);
 
     loop = g_main_loop_new (NULL, FALSE);
+    setRadioState(RADIO_STATE_OFF);
 
     if (initOfono())
         return 0;
-
-#if 0
-    LOGD("Running main loop");
-    g_main_loop_run(loop);
-#endif
-
 
     pthread_attr_init (&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);

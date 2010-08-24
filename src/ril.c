@@ -85,6 +85,7 @@ typedef struct {
 } ORIL_Call;
 
 const gchar MODEM[] = "/isimodem";
+const gchar PDC_PATH[] = "/isimodem/primarycontext1";
 const gchar OFONO_SERVICE[] = "org.ofono";
 const gchar OFONO_IFACE_CALL[] = "org.ofono.VoiceCall";
 const gchar OFONO_IFACE_CALLMAN[] = "org.ofono.VoiceCallManager";
@@ -92,13 +93,14 @@ const gchar OFONO_IFACE_SIMMANAGER[] = "org.ofono.SimManager";
 const gchar OFONO_IFACE_NETREG[] = "org.ofono.NetworkRegistration";
 const gchar OFONO_IFACE_SMSMAN[] = "org.ofono.SmsManager";
 const gchar OFONO_IFACE_CONNMAN[] = "org.ofono.DataConnectionManager";
+const gchar OFONO_IFACE_PDC[] = "org.ofono.PrimaryDataContext";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
 const gchar OFONO_SIGNAL_DISCONNECT_REASON[] = "DisconnectReason";
 
 static ORIL_Call orCalls[8];
 static GMainLoop *loop;
 static DBusGConnection *connection;
-static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *sms, *connman;
+static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *sms, *connman, *pdc;
 static int goingOnline = 0;
 static gboolean screenState = TRUE;
 static int lastCallFailCause;
@@ -113,6 +115,12 @@ static char netregMCC[4], netregMNC[4];
 
 /* DataConnectionManager */
 static gboolean connmanAttached = FALSE;
+// XXX not thread safe?
+char ipDataCall[16];
+// we always use only one context for PDC: primarycontext1
+char *responseDataCall[3] = { "1", "gprs0", ipDataCall };
+RIL_Token dataCallToken;
+gboolean pdcActive = FALSE;
 
 #ifdef RIL_SHLIB
 static const struct RIL_Env *s_rilenv;
@@ -256,7 +264,7 @@ static int obj_set_property(DBusGProxy *obj, const gchar *prop, GValue *value)
 {
     GError *error = NULL;
     if (obj) {
-        if ( !dbus_g_proxy_call(modem, "SetProperty", &error,
+        if ( !dbus_g_proxy_call(obj, "SetProperty", &error,
                                 G_TYPE_STRING, prop,
                                 G_TYPE_VALUE, value,
                                 G_TYPE_INVALID) )
@@ -630,16 +638,110 @@ static void requestSendSMS(void *data, size_t datalen, RIL_Token t)
 
 static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
 {
-    // we always use only one context for PDC: primarycontext1
-    char *response[2] = { "1", "gprs0" };
+    if (!connmanAttached) {
+        LOGW("requestSetupDataCall exit, connman is not in Attached state");
+        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+        return;
+    }
+
+    gboolean res = TRUE;
     const char *apn  = ((const char **)data)[2];
     const char *user = ((const char **)data)[3];
     const char *pswd = ((const char **)data)[4];
-    const char *auth = ((const char **)data)[5];
-    LOGD("requestSetupDataCall, %s, %s, %s, %s", apn, user, pswd, auth);
+    LOGD("requestSetupDataCall, %s, %s, %s", apn, user, pswd);
 
-    RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
+    // APN
+    {
+        GValue value = { 0 };
+        g_value_init(&value, G_TYPE_STRING);
+        g_value_set_static_string(&value, apn);
+        obj_set_property(pdc, "AccessPointName", &value);
+    }
+
+    // Username
+    {
+        GValue value = { 0 };
+        g_value_init(&value, G_TYPE_STRING);
+        g_value_set_static_string(&value, user);
+        obj_set_property(pdc, "Username", &value);
+    }
+
+    // Password
+    {
+        GValue value = { 0 };
+        g_value_init(&value, G_TYPE_STRING);
+        g_value_set_static_string(&value, pswd);
+        obj_set_property(pdc, "Password", &value);
+    }
+
+    // will be used later, after receiving PropertyChanged signal
+    ipDataCall[0] = 0;
+    dataCallToken = t;
+
+    // Set Active property
+    {
+        GValue value = { 0 };
+        g_value_init(&value, G_TYPE_BOOLEAN);
+        g_value_set_boolean(&value, TRUE);
+        obj_set_property(pdc, "Active", &value);
+    }
+
+    LOGW("Data connection setup: success");
+    //RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
     //RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+}
+
+static void requestDeactivateDataCall(void *data, size_t datalen, RIL_Token t)
+{
+    {
+        GValue value = { 0 };
+        g_value_init(&value, G_TYPE_BOOLEAN);
+        g_value_set_boolean(&value, FALSE);
+        obj_set_property(pdc, "Active", &value);
+    }
+    RIL_onRequestComplete(t, RIL_E_REQUEST_NOT_SUPPORTED, NULL, 0);
+}
+
+static void setupIP()
+{
+    LOGD("setupIP called");
+}
+
+static void getIP()
+{
+    LOGD("getIP called");
+
+    // Get IP address of new connection
+    GHashTable *dictProps = iface_get_properties(pdc);
+    if (!dictProps) {
+        LOGD("!dictProps");
+        goto error;
+    }
+    LOGD("Props-ok");
+    GValue *valueSettings = (GValue*) g_hash_table_lookup(dictProps, "Settings");
+    if (!valueSettings) {
+        LOGE("!valueSettings");
+        goto error;
+    }
+    LOGD("valueSettings-ok");
+    GHashTable *dictSettings = (GHashTable*) g_value_peek_pointer(valueSettings);
+    GValue *value = (GValue *) g_hash_table_lookup(dictSettings, "Address");
+    LOGD("Address: %p", value);
+    if (value && g_value_peek_pointer(value)) {
+        LOGW("IP Address=%s", (char*)g_value_peek_pointer(value));
+        strncpy(ipDataCall, g_value_peek_pointer(value), sizeof(ipDataCall));
+        setupIP();
+        RIL_onRequestComplete(dataCallToken, RIL_E_SUCCESS, responseDataCall, sizeof(responseDataCall));
+        return;
+    }
+    else {
+        LOGE("No IP Address in Properties:Settings");
+        goto error;
+    }
+
+error:
+    LOGE("getIP: ERROR!!!");
+    RIL_onRequestComplete(dataCallToken, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
 static void requestSMSAcknowledge(void *data, size_t datalen, RIL_Token t)
@@ -956,6 +1058,9 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             break;
         case RIL_REQUEST_SETUP_DATA_CALL:
             requestSetupDataCall(data, datalen, t);
+            break;
+        case RIL_REQUEST_DEACTIVATE_DATA_CALL:
+            requestDeactivateDataCall(data, datalen, t);
             break;
         case RIL_REQUEST_SMS_ACKNOWLEDGE:
             requestSMSAcknowledge(data, datalen, t);
@@ -1427,6 +1532,20 @@ static void connman_property_changed(DBusGProxy *proxy, const gchar *property,
     g_value_unset(value);
 }
 
+static void pdc_property_changed(DBusGProxy *proxy, const gchar *property,
+                                 GValue *value, gpointer user_data)
+{
+    // XXX
+    LOGW("pcd_property_changed %s->%s", property, g_strdup_value_contents(value));
+    if (!g_strcmp0(property, "Active")) {
+        pdcActive = g_value_get_boolean(value);
+        if (pdcActive) {
+            getIP();
+        }
+    }
+    g_value_unset(value);
+}
+
 static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
                                     GValue *value, gpointer user_data)
 {
@@ -1541,6 +1660,38 @@ static void initSimInterface()
         LOGE("Failed to create SIM proxy object");
 }
 
+static void initConnManager()
+{
+    // DataConnectionManager
+    connman = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_CONNMAN);
+    if (connman) {
+        dbus_g_proxy_add_signal(connman, OFONO_SIGNAL_PROPERTY_CHANGED,
+                                G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+        dbus_g_proxy_connect_signal(connman,
+                                    OFONO_SIGNAL_PROPERTY_CHANGED,
+                                    G_CALLBACK(connman_property_changed), connman, NULL);
+        LOGW("DataConnectionManager proxy created");
+    }
+    else {
+        LOGE("Failed to create DataConnectionManager proxy object");
+        return;
+    }
+
+    // org.ofono.PrimaryDataContext
+    pdc = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, PDC_PATH, OFONO_IFACE_PDC);
+    if (pdc) {
+        dbus_g_proxy_add_signal(pdc, OFONO_SIGNAL_PROPERTY_CHANGED,
+                                G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+        dbus_g_proxy_connect_signal(pdc,
+                                    OFONO_SIGNAL_PROPERTY_CHANGED,
+                                    G_CALLBACK(pdc_property_changed), pdc, NULL);
+        LOGW("PrimaryDataContext proxy created");
+    }
+    else
+        LOGE("Failed to create PrimaryDataContext proxy object");
+
+}
+
 static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                                    GValue *value, gpointer user_data)
 {
@@ -1598,17 +1749,7 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                     LOGE("Failed to create SmsMan proxy object");
             }
             else if (!connman && !g_strcmp0(*ifArr, OFONO_IFACE_CONNMAN)) {
-                connman = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_CONNMAN);
-                if (connman) {
-                    dbus_g_proxy_add_signal(connman, OFONO_SIGNAL_PROPERTY_CHANGED,
-                                            G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
-                    dbus_g_proxy_connect_signal(connman,
-                                                OFONO_SIGNAL_PROPERTY_CHANGED,
-                                                G_CALLBACK(connman_property_changed), connman, NULL);
-                    LOGW("DataConnectionManager proxy created");
-                }
-                else
-                    LOGE("Failed to create DataConnectionManager proxy object");
+                initConnManager();
             }
             ifArr++;
         }

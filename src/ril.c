@@ -179,7 +179,7 @@ static void onSIMReady()
 #endif
 }
 
-static int obj_set_property(DBusGProxy *obj, const gchar *prop, GValue *value)
+static int objSetProperty(DBusGProxy *obj, const gchar *prop, GValue *value)
 {
     GError *error = NULL;
     if (obj) {
@@ -209,11 +209,11 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
     g_value_init(&value, G_TYPE_BOOLEAN);
     if (onOff == 0 /*&& sState != RADIO_STATE_OFF*/) {
         g_value_set_boolean(&value, FALSE);
-        obj_set_property(modem, "Powered", &value);
+        objSetProperty(modem, "Powered", &value);
         setRadioState(RADIO_STATE_OFF);
     } else if (onOff > 0 /*&& sState == RADIO_STATE_OFF*/) {
         g_value_set_boolean(&value, TRUE);
-        obj_set_property(modem, "Powered", &value);
+        objSetProperty(modem, "Powered", &value);
     }
 
     RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
@@ -574,7 +574,7 @@ static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
         GValue value = { 0 };
         g_value_init(&value, G_TYPE_STRING);
         g_value_set_static_string(&value, apn);
-        obj_set_property(pdc, "AccessPointName", &value);
+        objSetProperty(pdc, "AccessPointName", &value);
     }
 
     // Username
@@ -582,7 +582,7 @@ static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
         GValue value = { 0 };
         g_value_init(&value, G_TYPE_STRING);
         g_value_set_static_string(&value, user);
-        obj_set_property(pdc, "Username", &value);
+        objSetProperty(pdc, "Username", &value);
     }
 
     // Password
@@ -590,7 +590,7 @@ static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
         GValue value = { 0 };
         g_value_init(&value, G_TYPE_STRING);
         g_value_set_static_string(&value, pswd);
-        obj_set_property(pdc, "Password", &value);
+        objSetProperty(pdc, "Password", &value);
     }
 
     // will be used later, after receiving PropertyChanged signal
@@ -602,7 +602,7 @@ static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
         GValue value = { 0 };
         g_value_init(&value, G_TYPE_BOOLEAN);
         g_value_set_boolean(&value, TRUE);
-        obj_set_property(pdc, "Active", &value);
+        objSetProperty(pdc, "Active", &value);
     }
 
     LOGW("Data connection setup: success");
@@ -616,7 +616,7 @@ static void requestDeactivateDataCall(void *data, size_t datalen, RIL_Token t)
         GValue value = { 0 };
         g_value_init(&value, G_TYPE_BOOLEAN);
         g_value_set_boolean(&value, FALSE);
-        obj_set_property(pdc, "Active", &value);
+        objSetProperty(pdc, "Active", &value);
     }
     RIL_onRequestComplete(t, RIL_E_REQUEST_NOT_SUPPORTED, NULL, 0);
 }
@@ -1296,11 +1296,6 @@ mainLoop(void *param)
     return 0;
 }
 
-static int setProperty(DBusGProxy *proxy, const gchar *property, GValue *value)
-{
-    return 0;
-}
-
 static void call_property_changed(DBusGProxy *proxy, const gchar *property,
                                    GValue *value, gpointer user_data)
 {
@@ -1558,7 +1553,7 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                 GValue value = { 0 };
                 g_value_init(&value, G_TYPE_BOOLEAN);
                 g_value_set_boolean(&value, TRUE);
-                obj_set_property(modem, "Online", &value);
+                objSetProperty(modem, "Online", &value);
                 goingOnline = 1;
                 setRadioState(RADIO_STATE_SIM_READY);
             }

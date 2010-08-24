@@ -43,6 +43,8 @@
 
 #include "marshaller.h"
 
+#define G_VALUE_INITIALIZATOR {0,{{0}}}
+
 typedef enum {
     SIM_ABSENT = 0,
     SIM_NOT_READY = 1,
@@ -120,7 +122,7 @@ static gboolean connmanAttached = FALSE;
 char ipDataCall[16];
 const char gprsIfName[] = "gprs0";
 // we always use only one context for PDC: primarycontext1
-char *responseDataCall[3] = { "1", gprsIfName, ipDataCall };
+const char *responseDataCall[3] = { "1", gprsIfName, ipDataCall };
 RIL_Token dataCallToken;
 gboolean pdcActive = FALSE;
 
@@ -205,7 +207,7 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
     assert (datalen >= sizeof(int *));
     onOff = ((int *)data)[0];
 
-    GValue value = { 0 };
+    GValue value = G_VALUE_INITIALIZATOR;
     g_value_init(&value, G_TYPE_BOOLEAN);
     if (onOff == 0 /*&& sState != RADIO_STATE_OFF*/) {
         g_value_set_boolean(&value, FALSE);
@@ -266,7 +268,7 @@ static void call_answer(const gchar *callPath, int answerOrHangup)
 {
     const gchar *method = answerOrHangup ? "Answer" : "Hangup";
     GError *error = NULL;
-    DBusGProxy *call = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, callPath, "org.ofono.VoiceCall");
+    DBusGProxy *call = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, callPath, OFONO_IFACE_CALL);
     if (call) {
         if (!dbus_g_proxy_call(call, method, &error, G_TYPE_INVALID, G_TYPE_INVALID))
             LOGE("Call->%s failed for %s: %s", method, callPath, error->message);
@@ -571,7 +573,7 @@ static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
 
     // APN
     {
-        GValue value = { 0 };
+        GValue value = G_VALUE_INITIALIZATOR;
         g_value_init(&value, G_TYPE_STRING);
         g_value_set_static_string(&value, apn);
         objSetProperty(pdc, "AccessPointName", &value);
@@ -579,7 +581,7 @@ static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
 
     // Username
     {
-        GValue value = { 0 };
+        GValue value = G_VALUE_INITIALIZATOR;
         g_value_init(&value, G_TYPE_STRING);
         g_value_set_static_string(&value, user);
         objSetProperty(pdc, "Username", &value);
@@ -587,7 +589,7 @@ static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
 
     // Password
     {
-        GValue value = { 0 };
+        GValue value = G_VALUE_INITIALIZATOR;
         g_value_init(&value, G_TYPE_STRING);
         g_value_set_static_string(&value, pswd);
         objSetProperty(pdc, "Password", &value);
@@ -599,7 +601,7 @@ static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
 
     // Set Active property
     {
-        GValue value = { 0 };
+        GValue value = G_VALUE_INITIALIZATOR;
         g_value_init(&value, G_TYPE_BOOLEAN);
         g_value_set_boolean(&value, TRUE);
         objSetProperty(pdc, "Active", &value);
@@ -613,7 +615,7 @@ static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
 static void requestDeactivateDataCall(void *data, size_t datalen, RIL_Token t)
 {
     {
-        GValue value = { 0 };
+        GValue value = G_VALUE_INITIALIZATOR;
         g_value_init(&value, G_TYPE_BOOLEAN);
         g_value_set_boolean(&value, FALSE);
         objSetProperty(pdc, "Active", &value);
@@ -1434,7 +1436,7 @@ static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
 
 static void initVoiceCallInterfaces()
 {
-    vcm = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, "org.ofono.VoiceCallManager");
+    vcm = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_CALLMAN);
     if (vcm) {
         dbus_g_proxy_add_signal(vcm, OFONO_SIGNAL_PROPERTY_CHANGED, G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
         dbus_g_proxy_connect_signal(vcm,
@@ -1550,7 +1552,7 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
             }
             else if (!goingOnline && !g_strcmp0(*ifArr, "org.ofono.Phonebook")) {
                 LOGW("Phonebook is created, going online");
-                GValue value = { 0 };
+                GValue value = G_VALUE_INITIALIZATOR;
                 g_value_init(&value, G_TYPE_BOOLEAN);
                 g_value_set_boolean(&value, TRUE);
                 objSetProperty(modem, "Online", &value);

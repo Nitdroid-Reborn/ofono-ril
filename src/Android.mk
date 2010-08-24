@@ -33,6 +33,7 @@ LOCAL_C_INCLUDES := \
 
 LOCAL_SHARED_LIBRARIES := \
 	libcutils \
+	libnetutils \
 	libglib-2.0 \
 	libril \
 	libdbus \

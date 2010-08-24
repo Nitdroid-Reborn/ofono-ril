@@ -32,6 +32,7 @@
 #include <getopt.h>
 #include <sys/socket.h>
 #include <cutils/sockets.h>
+#include <netutils/ifc.h>
 #include <termios.h>
 
 #define LOG_TAG "RIL"
@@ -117,8 +118,9 @@ static char netregMCC[4], netregMNC[4];
 static gboolean connmanAttached = FALSE;
 // XXX not thread safe?
 char ipDataCall[16];
+const char gprsIfName[] = "gprs0";
 // we always use only one context for PDC: primarycontext1
-char *responseDataCall[3] = { "1", "gprs0", ipDataCall };
+char *responseDataCall[3] = { "1", gprsIfName, ipDataCall };
 RIL_Token dataCallToken;
 gboolean pdcActive = FALSE;
 
@@ -702,9 +704,22 @@ static void requestDeactivateDataCall(void *data, size_t datalen, RIL_Token t)
     RIL_onRequestComplete(t, RIL_E_REQUEST_NOT_SUPPORTED, NULL, 0);
 }
 
-static void setupIP()
+static int setupIP()
 {
-    LOGD("setupIP called");
+    in_addr_t ip = inet_addr(responseDataCall[2]);
+    if (ifc_set_addr(gprsIfName, ip)) {
+        LOGE("Can't set IP address: %s", strerror(errno));
+        return 0;
+    }
+    if (ifc_up(gprsIfName)) {
+        LOGE("Can't UP network interface: %s", strerror(errno));
+        return 0;
+    }
+    if (ifc_set_default_route(gprsIfName, ip)) {
+        LOGE("Can't set default route: %s", strerror(errno));
+        return 0;
+    }
+    return 1;
 }
 
 static void getIP()
@@ -717,7 +732,7 @@ static void getIP()
         LOGD("!dictProps");
         goto error;
     }
-    LOGD("Props-ok");
+
     GValue *valueSettings = (GValue*) g_hash_table_lookup(dictProps, "Settings");
     if (!valueSettings) {
         LOGE("!valueSettings");
@@ -728,16 +743,23 @@ static void getIP()
     GValue *value = (GValue *) g_hash_table_lookup(dictSettings, "Address");
     LOGD("Address: %p", value);
     if (value && g_value_peek_pointer(value)) {
-        LOGW("IP Address=%s", (char*)g_value_peek_pointer(value));
         strncpy(ipDataCall, g_value_peek_pointer(value), sizeof(ipDataCall));
-        setupIP();
-        RIL_onRequestComplete(dataCallToken, RIL_E_SUCCESS, responseDataCall, sizeof(responseDataCall));
-        return;
+        LOGW("IP Address=%s", ipDataCall);
+
+        if (ifc_init() != 0) {
+            LOGE("ifc_init failed");
+            goto error;
+        }
+
+        if (setupIP()) {
+            RIL_onRequestComplete(dataCallToken, RIL_E_SUCCESS, responseDataCall, sizeof(responseDataCall));
+            ifc_close();
+            return;
+        }
+        ifc_close();
     }
-    else {
+    else
         LOGE("No IP Address in Properties:Settings");
-        goto error;
-    }
 
 error:
     LOGE("getIP: ERROR!!!");

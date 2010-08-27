@@ -107,7 +107,7 @@ static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *sms, *connman, *pdc;
 static int goingOnline = 0;
 static gboolean screenState = TRUE;
 static int lastCallFailCause;
-static char simIMSI[16];
+static char simIMSI[16], modemIMEI[16];
 
 /* Network Registratior */
 static int netregStatus = 0; // Not registered
@@ -123,7 +123,7 @@ char ipDataCall[16];
 const char gprsIfName[] = "gprs0";
 // we always use only one context for PDC: primarycontext1
 const char *responseDataCall[3] = { "1", gprsIfName, ipDataCall };
-RIL_Token dataCallToken;
+RIL_Token dataCallToken, poweredToken, imeiToken;
 gboolean pdcActive = FALSE;
 
 #ifdef RIL_SHLIB
@@ -213,12 +213,12 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
         g_value_set_boolean(&value, FALSE);
         objSetProperty(modem, "Powered", &value);
         setRadioState(RADIO_STATE_OFF);
+        RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
     } else if (onOff > 0 /*&& sState == RADIO_STATE_OFF*/) {
         g_value_set_boolean(&value, TRUE);
         objSetProperty(modem, "Powered", &value);
+        poweredToken = t;
     }
-
-    RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 }
 
 static void requestOrSendDataCallList(RIL_Token *t);
@@ -843,11 +843,12 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
     }
 
     /* Ignore all non-power requests when RADIO_STATE_OFF
-     * (except RIL_REQUEST_GET_SIM_STATUS)
+     * (except RIL_REQUEST_GET_SIM_STATUS and RIL_REQUEST_GET_IMEI)
      */
     if (sState == RADIO_STATE_OFF
         && !(request == RIL_REQUEST_RADIO_POWER
-             || request == RIL_REQUEST_GET_SIM_STATUS)
+             || request == RIL_REQUEST_GET_SIM_STATUS
+             || request == RIL_REQUEST_GET_IMEI)
         ) {
         RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
         return;
@@ -1012,8 +1013,13 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
                                   simIMSI, sizeof(char *));
             break;
         case RIL_REQUEST_GET_IMEI:
-            RIL_onRequestComplete(t, RIL_E_SUCCESS,
-                                  "123123123123", sizeof(char *));
+            // report IMEI if we already have it
+            if (modemIMEI[0]) {
+                RIL_onRequestComplete(t, RIL_E_SUCCESS,
+                                      modemIMEI, sizeof(char *));
+            }
+            else
+                imeiToken = t;
             break;
 
         case RIL_REQUEST_SIM_IO:
@@ -1591,12 +1597,20 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
             ifArr++;
         }
     }
-#if 0
     else if (g_strcmp0(property, "Powered") == 0) {
-        if (g_value_get_boolean(value) == TRUE) {
+        if (poweredToken) {
+            RIL_onRequestComplete(poweredToken, RIL_E_SUCCESS, NULL, 0);
+            poweredToken = 0;
         }
     }
-#endif
+    else if (g_strcmp0(property, "Serial") == 0) {
+        strncpy(modemIMEI, g_value_peek_pointer(value), sizeof(modemIMEI));
+        if (imeiToken) {
+            RIL_onRequestComplete(imeiToken, RIL_E_SUCCESS,
+                                  modemIMEI, sizeof(char *));
+            imeiToken = 0;
+        }
+    }
 
     g_value_unset(value);
 }

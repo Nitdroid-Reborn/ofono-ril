@@ -99,6 +99,8 @@ const gchar OFONO_IFACE_CONNMAN[] = "org.ofono.DataConnectionManager";
 const gchar OFONO_IFACE_PDC[] = "org.ofono.PrimaryDataContext";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
 const gchar OFONO_SIGNAL_DISCONNECT_REASON[] = "DisconnectReason";
+const gchar OFONO_SIGNAL_IMMEDIATE_MESSAGE[] = "ImmediateMessage";
+const gchar OFONO_SIGNAL_INCOMING_MESSAGE[] = "IncomingMessage";
 
 static ORIL_Call orCalls[8];
 static GMainLoop *loop;
@@ -1362,6 +1364,18 @@ static void sms_property_changed(DBusGProxy *proxy, const gchar *property,
     g_value_unset(value);
 }
 
+static void smsImmediateMessage(DBusGProxy *proxy, const gchar *message,
+                                GHashTable *dict, gpointer userData)
+{
+    LOGD("smsImmediateMessage: %s", message);
+}
+
+static void smsIncomingMessage(DBusGProxy *proxy, const gchar *message,
+                               GHashTable *dict, gpointer userData)
+{
+    LOGD("smsIncomingMessage: %s", message);
+}
+
 static void connman_property_changed(DBusGProxy *proxy, const gchar *property,
                                      GValue *value, gpointer user_data)
 {
@@ -1586,6 +1600,20 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                     dbus_g_proxy_connect_signal(sms,
                                                 OFONO_SIGNAL_PROPERTY_CHANGED,
                                                 G_CALLBACK(sms_property_changed), sms, NULL);
+
+                    dbus_g_proxy_add_signal(sms, OFONO_SIGNAL_IMMEDIATE_MESSAGE,
+                                            G_TYPE_STRING,
+                                            dbus_g_type_get_map("GHashTable", G_TYPE_STRING, G_TYPE_VALUE),
+                                            G_TYPE_INVALID);
+                    dbus_g_proxy_connect_signal(sms, OFONO_SIGNAL_IMMEDIATE_MESSAGE,
+                                                G_CALLBACK(smsImmediateMessage), sms, 0);
+
+                    dbus_g_proxy_add_signal(sms, OFONO_SIGNAL_INCOMING_MESSAGE,
+                                            G_TYPE_STRING,
+                                            dbus_g_type_get_map("GHashTable", G_TYPE_STRING, G_TYPE_VALUE),
+                                            G_TYPE_INVALID);
+                    dbus_g_proxy_connect_signal(sms, OFONO_SIGNAL_INCOMING_MESSAGE,
+                                                G_CALLBACK(smsIncomingMessage), sms, 0);
                     LOGW("SmsManager proxy created");
                 }
                 else

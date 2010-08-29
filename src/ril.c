@@ -97,15 +97,17 @@ const gchar OFONO_IFACE_NETREG[] = "org.ofono.NetworkRegistration";
 const gchar OFONO_IFACE_SMSMAN[] = "org.ofono.SmsManager";
 const gchar OFONO_IFACE_CONNMAN[] = "org.ofono.DataConnectionManager";
 const gchar OFONO_IFACE_PDC[] = "org.ofono.PrimaryDataContext";
+const gchar OFONO_IFACE_SUPSRV[] = "org.ofono.SupplementaryServices";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
 const gchar OFONO_SIGNAL_DISCONNECT_REASON[] = "DisconnectReason";
 const gchar OFONO_SIGNAL_IMMEDIATE_MESSAGE[] = "ImmediateMessage";
 const gchar OFONO_SIGNAL_INCOMING_MESSAGE[] = "IncomingMessage";
+const gchar OFONO_SIGNAL_REQUEST_RECEIVED[] = "RequestReceived";
 
 static ORIL_Call orCalls[8];
 static GMainLoop *loop;
 static DBusGConnection *connection;
-static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *sms, *connman, *pdc;
+static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *sms, *connman, *pdc, *supsrv;
 static int goingOnline = 0;
 static gboolean screenState = TRUE;
 static int lastCallFailCause;
@@ -801,15 +803,36 @@ static void  requestEnterSimPin(void*  data, size_t  datalen, RIL_Token  t)
 
 static void  requestSendUSSD(void *data, size_t datalen, RIL_Token t)
 {
-    const char *ussdRequest;
+    const char *ussdRequest = (char *)(data);
 
-    ussdRequest = (char *)(data);
+    if (!supsrv) {
+        RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
+        return;
+    }
 
+    GError *error = NULL;
+    char *request = 0;
+    GValue value = G_VALUE_INITIALIZATOR;
+    if (!dbus_g_proxy_call(supsrv, "Initiate", &error,
+                           G_TYPE_STRING, ussdRequest, G_TYPE_INVALID,
+                           G_TYPE_STRING, &request, G_TYPE_VALUE, &value, G_TYPE_INVALID))
+    {
+        LOGE("supsrv.Initiate(%s) failed: %s",
+             ussdRequest, error->message);
+        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+    }
+    else {
+        LOGD("USSD response from network: %s, %s", request, (char*)g_value_peek_pointer(&value));
+        RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 
-    RIL_onRequestComplete(t, RIL_E_REQUEST_NOT_SUPPORTED, NULL, 0);
+        char *unsResp[2];
+        unsResp[0] = "0";
+        unsResp[1] = g_value_peek_pointer(&value);
+        RIL_onUnsolicitedResponse(RIL_UNSOL_ON_USSD, unsResp, sizeof(unsResp));
 
-    // @@@ TODO
-
+        if (request) g_free(request);
+        g_value_unset(&value);
+    }
 }
 
 
@@ -1356,6 +1379,21 @@ static void sim_property_changed(DBusGProxy *proxy, const gchar *property,
     g_value_unset(value);
 }
 
+static void supsrvPropertyChanged(DBusGProxy *proxy, const gchar *property,
+                                  GValue *value, gpointer user_data)
+{
+    // XXX
+    LOGW("supsrvPropertyChanged %s->%s", property, g_strdup_value_contents(value));
+    g_value_unset(value);
+}
+
+static void supsrvRequestReceived(DBusGProxy *proxy, const gchar *message,
+                                  gpointer user_data)
+{
+    // XXX
+    LOGW("supsrvRequestReceived %s", message);
+}
+
 static void sms_property_changed(DBusGProxy *proxy, const gchar *property,
                                  GValue *value, gpointer user_data)
 {
@@ -1618,6 +1656,25 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                 }
                 else
                     LOGE("Failed to create SmsMan proxy object");
+            }
+            else if (!supsrv && !g_strcmp0(*ifArr, OFONO_IFACE_SUPSRV)) {
+                supsrv = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_SUPSRV);
+                if (supsrv) {
+                    dbus_g_proxy_add_signal(supsrv, OFONO_SIGNAL_PROPERTY_CHANGED,
+                                            G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+                    dbus_g_proxy_connect_signal(supsrv,
+                                                OFONO_SIGNAL_PROPERTY_CHANGED,
+                                                G_CALLBACK(supsrvPropertyChanged), supsrv, NULL);
+
+                    dbus_g_proxy_add_signal(supsrv, OFONO_SIGNAL_REQUEST_RECEIVED,
+                                            G_TYPE_STRING, G_TYPE_INVALID);
+                    dbus_g_proxy_connect_signal(supsrv, OFONO_SIGNAL_REQUEST_RECEIVED,
+                                                G_CALLBACK(supsrvRequestReceived), supsrv, 0);
+
+                    LOGW("SupplementaryServices proxy created");
+                }
+                else
+                    LOGE("Failed to create SupplementaryServices proxy object");
             }
             else if (!connman && !g_strcmp0(*ifArr, OFONO_IFACE_CONNMAN)) {
                 initConnManager();

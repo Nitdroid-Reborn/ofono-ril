@@ -117,7 +117,7 @@ static char simIMSI[16], modemIMEI[16];
 static int netregStatus = 0; // Not registered
 static unsigned int netregLAC, netregCID, netregStrength;
 
-static char *netregOperator = 0;
+static char netregOperator[32]; // big enought?
 static char netregMCC[4], netregMNC[4];
 
 /* DataConnectionManager */
@@ -530,18 +530,17 @@ static void requestRegistrationState(void *data, size_t datalen, RIL_Token t)
 static void requestOperator(void *data, size_t datalen, RIL_Token t)
 {
     char *response[3];
-    memset(response, sizeof(response), 0);
+    char mccMnc[8];
     
     if (netregStatus == 1) {
         response[0] = netregOperator;
         response[1] = netregOperator;
-        asprintf(&response[2], "%s%s", netregMCC, netregMNC);
+        response[2] = mccMnc;
+        snprintf(mccMnc, sizeof(mccMnc), "%s%s", netregMCC, netregMNC);
         RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
     }
-    else {
-        response[0] = NULL;
+    else
         RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
-    }
 }
 
 static void requestSendSMS(void *data, size_t datalen, RIL_Token t)
@@ -1441,8 +1440,8 @@ static void pdc_property_changed(DBusGProxy *proxy, const gchar *property,
     g_value_unset(value);
 }
 
-static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
-                                    GValue *value, gpointer user_data)
+static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
+                                  GValue *value, gpointer user_data)
 {
     if (!g_strcmp0(property, "Strength")) {
       //LOGD("Strength: %u, screenState=%d", g_value_get_uint(value), screenState);
@@ -1471,11 +1470,12 @@ static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
             netregStatus = 0; // Not registered, not searching
             netregMCC[0] = 0;
             netregMNC[0] = 0;
+            netregOperator[0] = 0;
         }
     }
     else if (!g_strcmp0(property, "Name")) {
-        asprintf(&netregOperator, "%s",
-                 (const char*) g_strdup_value_contents(value));
+        snprintf(netregOperator, sizeof(netregOperator), "%s",
+                 (const char* )g_value_peek_pointer(value));
     }
     else if (!g_strcmp0(property, "MobileNetworkCode")) {
         snprintf(netregMNC, sizeof(netregMNC), "%s",
@@ -1486,8 +1486,9 @@ static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
                  (const char*) g_value_peek_pointer(value));
     }
 
-    // XXX
-    LOGW("netreg_property_changed %s->%s", property, g_strdup_value_contents(value));
+    gchar *valStr = g_strdup_value_contents(value);
+    LOGW("netreg_property_changed %s->%s", property, valStr);
+    g_free(valStr);
     sendNetworkStateChanged();
     g_value_unset(value);
 }
@@ -1624,7 +1625,7 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                                             G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
                     dbus_g_proxy_connect_signal(netreg,
                                                 OFONO_SIGNAL_PROPERTY_CHANGED,
-                                                G_CALLBACK(netreg_property_changed), netreg, NULL);
+                                                G_CALLBACK(netregPropertyChanged), netreg, NULL);
                     LOGW("NetReg proxy created");
                 }
                 else

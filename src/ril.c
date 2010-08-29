@@ -1445,13 +1445,13 @@ static void netreg_property_changed(DBusGProxy *proxy, const gchar *property,
                                     GValue *value, gpointer user_data)
 {
     if (!g_strcmp0(property, "Strength")) {
-        //LOGD("Strength: %u, screenState=%d", g_value_get_uint(value), screenState);
-        if (!screenState)
-            return;
+      //LOGD("Strength: %u, screenState=%d", g_value_get_uint(value), screenState);
+      if (screenState) {
         netregStrength = g_value_get_uint(value);
         requestSignalStrength(0, 0, 0);
-        g_value_unset(value);
-        return;
+      }
+      g_value_unset(value);
+      return;
     }
     else if (!g_strcmp0(property, "CellId")) {
         netregCID = g_value_get_uint(value);

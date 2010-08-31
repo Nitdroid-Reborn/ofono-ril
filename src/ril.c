@@ -88,7 +88,6 @@ typedef struct {
 } ORIL_Call;
 
 const gchar MODEM[] = "/isimodem";
-const gchar PDC_PATH[] = "/isimodem/primarycontext1";
 const gchar OFONO_SERVICE[] = "org.ofono";
 const gchar OFONO_IFACE_CALL[] = "org.ofono.VoiceCall";
 const gchar OFONO_IFACE_CALLMAN[] = "org.ofono.VoiceCallManager";
@@ -1573,8 +1572,41 @@ static void initConnManager()
         return;
     }
 
-    // org.ofono.PrimaryDataContext
-    pdc = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, PDC_PATH, OFONO_IFACE_PDC);
+    // find existing context
+    char *pdcPath = NULL;
+    GHashTable *dictProp = iface_get_properties(connman);
+    GValue *valContexts = (GValue *) g_hash_table_lookup(dictProp, "PrimaryContexts");
+    GPtrArray *arrContextPaths = g_value_peek_pointer(valContexts);
+    LOGD("arrContextPaths: %d entries", arrContextPaths->len);
+    // we'll use first found context
+    if (arrContextPaths->len)
+        pdcPath = g_strdup((const char*) g_ptr_array_index(arrContextPaths, 0));
+
+    g_hash_table_destroy(dictProp);
+
+    if (!pdcPath) {
+        // create new context if nothing found
+        GError *error = NULL;
+        LOGD("ConnMan.CreateContext preparing for crash...");
+        if ( !dbus_g_proxy_call(connman, "CreateContext", &error,
+                                G_TYPE_STRING, "internet",
+                                G_TYPE_STRING, "internet",
+                                G_TYPE_INVALID,
+                                DBUS_TYPE_G_PROXY, &pdc, G_TYPE_INVALID) )
+        {
+            LOGE("ConnMan.CreateContext failed: %s", error->message);
+            g_error_free (error);
+            return;
+        }
+        dbus_g_proxy_set_interface(pdc, OFONO_IFACE_PDC);
+    }
+    else {
+        // create org.ofono.PrimaryDataContext proxy
+        LOGD("pdcPath: %s", pdcPath);
+        pdc = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, pdcPath, OFONO_IFACE_PDC);
+        g_free(pdcPath);
+    }
+
     if (pdc) {
         dbus_g_proxy_add_signal(pdc, OFONO_SIGNAL_PROPERTY_CHANGED,
                                 G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);

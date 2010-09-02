@@ -65,7 +65,6 @@ static const char *getVersion();
 static int isRadioOn();
 static int getCardStatus(RIL_CardStatus **pp_card_status);
 static void freeCardStatus(RIL_CardStatus *p_card_status);
-static void onDataCallListChanged(void *param);
 
 extern const char * requestToString(int request);
 
@@ -152,7 +151,7 @@ static const struct timeval TIMEVAL_0 = {0,0};
 static void pollSIMState (void *param);
 static void setRadioState(RIL_RadioState newState);
 
-void hash_entry_gvalue_print(const gchar *key, GValue *val, gpointer userdata)
+static void hash_entry_gvalue_print(const gchar *key, GValue *val, gpointer userdata)
 {
 	char *str = g_strdup_value_contents(val);
 	LOGD("[\"%s\"] = %s", key, str);
@@ -231,19 +230,7 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
     }
 }
 
-static void requestOrSendDataCallList(RIL_Token *t);
-
-static void onDataCallListChanged(void *param)
-{
-    requestOrSendDataCallList(NULL);
-}
-
-static void requestDataCallList(void *data, size_t datalen, RIL_Token t)
-{
-    requestOrSendDataCallList(&t);
-}
-
-static void requestOrSendDataCallList(RIL_Token *t)
+static void requestDataCallList(RIL_Token *t)
 {
     if (!t) {
         RIL_onUnsolicitedResponse(RIL_UNSOL_DATA_CALL_LIST_CHANGED,
@@ -1081,7 +1068,7 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             break;
 
         case RIL_REQUEST_DATA_CALL_LIST:
-            requestDataCallList(data, datalen, t);
+            requestDataCallList(&t);
             break;
 
         case RIL_REQUEST_QUERY_NETWORK_SELECTION_MODE:

@@ -1,0 +1,8 @@
+- SMS: receiving large SMSes (127+ chars)
+- SMS: decoding address in non-international format (how to test?)
+- SMS: sending
+- USSD: improving support
+- DATA: fix reporting of technology we use (GPRS, EDGE, 3G etc) to Telephony layer
+- DATA: fix behavior on 'disconnections'
+- VOICECALLS: holding/waiting etc
+- VOICECALLS: audio sinks?

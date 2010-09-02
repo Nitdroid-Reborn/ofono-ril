@@ -1582,8 +1582,10 @@ static void initSimInterface()
         if (value) {
             strncpy(simIMSI, g_value_peek_pointer(value), sizeof(simIMSI));
         }
-        else
-            LOGE("No SubscriberIdentity!");
+        else {
+            LOGE("No SubscriberIdentity! SIM is locked?");
+            simStatus = SIM_PIN;
+        }
 
         g_hash_table_destroy(dict);
     }

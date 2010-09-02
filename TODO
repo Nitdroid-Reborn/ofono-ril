@@ -6,3 +6,4 @@
 - DATA: fix behavior on 'disconnections'
 - VOICECALLS: holding/waiting etc
 - VOICECALLS: audio sinks?
+- SIM: pin/puk support (when it would be implemented in ofono)

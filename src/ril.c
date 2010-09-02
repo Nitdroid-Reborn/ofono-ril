@@ -110,6 +110,7 @@ static int goingOnline = 0;
 static gboolean screenState = TRUE;
 static int lastCallFailCause;
 static char simIMSI[16], modemIMEI[16];
+static SIM_Status simStatus = SIM_NOT_READY;
 
 /* Network Registratior */
 static int netregStatus = 0; // Not registered
@@ -1210,7 +1211,7 @@ getSIMStatus()
         return SIM_NOT_READY;
     }
 
-    return SIM_READY; // modem_sim_getstatus();
+    return simStatus;
 }
 
 
@@ -1546,18 +1547,45 @@ static void initSimInterface()
                                     G_CALLBACK(sim_property_changed), sim, NULL);
         LOGW("Sim proxy created");
 
-        // Read IMSI
         GHashTable *dict = iface_get_properties(sim);
-        if (dict) {
-            GValue *value = (GValue *) g_hash_table_lookup(dict, "SubscriberIdentity");
-            if (value) {
-                strncpy(simIMSI, g_value_peek_pointer(value), sizeof(simIMSI));
-                LOGD("Got IMSI: %6sXXXX", simIMSI);
-                g_value_unset(value);
-            }
-            else
-                LOGE("No SubscriberIdentity!");
+        if (!dict) {
+            LOGE("SimManager.GetProperties failed");
+            return;
         }
+        g_hash_table_foreach(dict, (GHFunc)hash_entry_gvalue_print, NULL);
+
+        // Check sim card is present
+        simStatus = SIM_ABSENT;
+        GValue *value = (GValue *) g_hash_table_lookup(dict, "Present");
+        if (value) {
+            if (g_value_get_boolean(value)) {
+                simStatus = SIM_READY;
+            }
+        }
+        else
+            LOGE("No Present property!");
+
+        // what PIN is required?
+        if (simStatus == SIM_READY) {
+            value = (GValue *) g_hash_table_lookup(dict, "PinRequired");
+            LOGD("PinRequired: %s", (char*) g_value_peek_pointer(value));
+            if ( !strcasecmp(g_value_peek_pointer(value), "pin") )
+                simStatus = SIM_PIN;
+            else if ( !strcasecmp(g_value_peek_pointer(value), "puk") )
+                simStatus = SIM_PUK;
+            else if ( strcasecmp(g_value_peek_pointer(value), "none") != 0 )
+                simStatus = SIM_NOT_READY; // FIXME
+        }
+
+        // Read IMSI
+        value = (GValue *) g_hash_table_lookup(dict, "SubscriberIdentity");
+        if (value) {
+            strncpy(simIMSI, g_value_peek_pointer(value), sizeof(simIMSI));
+        }
+        else
+            LOGE("No SubscriberIdentity!");
+
+        g_hash_table_destroy(dict);
     }
     else
         LOGE("Failed to create SIM proxy object");

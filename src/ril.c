@@ -152,6 +152,13 @@ static const struct timeval TIMEVAL_0 = {0,0};
 static void pollSIMState (void *param);
 static void setRadioState(RIL_RadioState newState);
 
+void hash_entry_gvalue_print(const gchar *key, GValue *val, gpointer userdata)
+{
+	char *str = g_strdup_value_contents(val);
+	LOGD("[\"%s\"] = %s", key, str);
+	free(str);
+}
+
 static RIL_CallState ofonoStateToRILState(const gchar *state)
 {
     if (!g_strcmp0(state, "active")) return RIL_CALL_ACTIVE;
@@ -1406,10 +1413,24 @@ static void smsImmediateMessage(DBusGProxy *proxy, const gchar *message,
     LOGD("smsImmediateMessage: %s", message);
 }
 
+extern int encodePDU(unsigned char *pdu, const char *message, const char *smsc, const char *sender);
+
 static void smsIncomingMessage(DBusGProxy *proxy, const gchar *message,
                                GHashTable *dict, gpointer userData)
 {
+    // TODO: more accurate guess about buffer length
+    unsigned char *pdu = malloc(60 + strlen(message)*2);
+
     LOGD("smsIncomingMessage: %s", message);
+    g_hash_table_foreach(dict, (GHFunc)hash_entry_gvalue_print, NULL);
+    GValue *sender = g_hash_table_lookup(dict, "Sender");
+    if (sender && encodePDU(pdu, message, "+79168999100", g_value_peek_pointer(sender))) {
+        LOGD("PDU: %s", pdu);
+        RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_NEW_SMS, pdu, sizeof(char*));
+        g_value_unset(sender);
+    }
+    g_hash_table_destroy(dict);
+    free(pdu);
 }
 
 static void connman_property_changed(DBusGProxy *proxy, const gchar *property,

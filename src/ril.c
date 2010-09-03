@@ -1412,13 +1412,25 @@ static void smsIncomingMessage(DBusGProxy *proxy, const gchar *message,
     LOGD("smsIncomingMessage: %s", message);
     g_hash_table_foreach(dict, (GHFunc)hash_entry_gvalue_print, NULL);
     GValue *sender = g_hash_table_lookup(dict, "Sender");
-    if (sender && encodePDU(pdu, message, "+79168999100", g_value_peek_pointer(sender))) {
+
+    // pdu encoder able to encode only to ucs2 encoding (2bytes/char),
+    // but length field stored as uint8.
+    // Cut down size of the message (better than drop it).
+    char *msg = (char*)message;
+    if (strlen(message) > 254/2) {
+        msg = strdup(message);
+        msg[126] = 0;
+    }
+
+    if (sender && encodePDU(pdu, msg, "+79168999100", g_value_peek_pointer(sender))) {
         LOGD("PDU: %s", pdu);
         RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_NEW_SMS, pdu, sizeof(char*));
         g_value_unset(sender);
     }
     g_hash_table_destroy(dict);
     free(pdu);
+    if (msg != message)
+        free(msg);
 }
 
 static void connman_property_changed(DBusGProxy *proxy, const gchar *property,

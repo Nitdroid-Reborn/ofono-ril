@@ -1407,7 +1407,7 @@ static void smsIncomingMessage(DBusGProxy *proxy, const gchar *message,
                                GHashTable *dict, gpointer userData)
 {
     // TODO: more accurate guess about buffer length
-    unsigned char *pdu = malloc(60 + strlen(message)*2);
+    unsigned char *pdu = malloc(120 + strlen(message)*2);
 
     LOGD("smsIncomingMessage: %s", message);
     g_hash_table_foreach(dict, (GHFunc)hash_entry_gvalue_print, NULL);

@@ -509,7 +509,7 @@ static void requestRegistrationState(void *data, size_t datalen, RIL_Token t)
     static char *responseStr[14];
     memset(responseStr, sizeof(responseStr), 0);
 
-    if (netregStatus == 1) {
+    if (netregStatus > 0) {
         asprintf(&responseStr[0], "%d", netregStatus);
         asprintf(&responseStr[1], "%x", netregLAC);
         asprintf(&responseStr[2], "%x", netregCID);
@@ -526,7 +526,7 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
     char *response[3];
     char mccMnc[8];
     
-    if (netregStatus == 1) {
+    if (netregStatus > 0) {
         response[0] = netregOperator;
         response[1] = netregOperator;
         response[2] = mccMnc;
@@ -1485,6 +1485,9 @@ static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
         }
         else if (!g_strcmp0(status, "registered")) {
             netregStatus = 1;
+        }
+        else if (!g_strcmp0(status, "roaming")) {
+            netregStatus = 5;
         }
         else {
             netregStatus = 0; // Not registered, not searching

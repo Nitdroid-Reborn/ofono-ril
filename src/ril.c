@@ -1400,7 +1400,7 @@ static void smsIncomingMessage(DBusGProxy *proxy, const gchar *message,
                                GHashTable *dict, gpointer userData)
 {
     // TODO: more accurate guess about buffer length
-    unsigned char *pdu = malloc(240 + strlen(message)*2);
+    unsigned char *pdu = malloc(240 + strlen(message)*4);
 
     LOGD("smsIncomingMessage: %s", message);
     g_hash_table_foreach(dict, (GHFunc)hash_entry_gvalue_print, NULL);
@@ -1832,6 +1832,7 @@ static int initOfono()
         LOGE("Modem path dosn't match: \"%s\", but we expect \"%s\"", modemPath, MODEM);
         return 0;
     }
+    g_ptr_array_free(modems, TRUE);
 
     error = NULL;
     modem = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, "org.ofono.Modem");

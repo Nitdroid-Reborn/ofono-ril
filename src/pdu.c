@@ -104,8 +104,8 @@ int encodePDU(unsigned char *pdu, const char *message, const char *smsc, const c
     char *ucs2_encoded = g_convert(message, -1, "UCS-2BE//TRANSLIT", "UTF-8",
                                    NULL, &converted, NULL);
 
-    if (!ucs2_encoded || !converted || converted > 255) {
-        LOGE("!ucs2_encoded (%p) || !converted (%d)", ucs2_encoded, (int)converted);
+    if (!ucs2_encoded || !converted) {
+        LOGE("!ucs2_encoded || !converted");
         return 0;
     }
     LOGD("UCS2 length: %d %d", (int)converted, ofs);

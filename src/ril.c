@@ -39,6 +39,7 @@
 #include <utils/Log.h>
 
 #include <glib/gthread.h>
+//#include <glib/gtypes.h>
 #include <dbus/dbus-glib.h>
 
 #include "marshaller.h"
@@ -93,7 +94,7 @@ const gchar OFONO_IFACE_CALLMAN[] = "org.ofono.VoiceCallManager";
 const gchar OFONO_IFACE_SIMMANAGER[] = "org.ofono.SimManager";
 const gchar OFONO_IFACE_NETREG[] = "org.ofono.NetworkRegistration";
 const gchar OFONO_IFACE_SMSMAN[] = "org.ofono.MessageManager";
-const gchar OFONO_IFACE_CONNMAN[] = "org.ofono.ConnectionManager2";
+const gchar OFONO_IFACE_CONNMAN[] = "org.ofono.ConnectionManager";
 const gchar OFONO_IFACE_PDC[] = "org.ofono.PrimaryDataContext";
 const gchar OFONO_IFACE_SUPSRV[] = "org.ofono.SupplementaryServices";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
@@ -1593,6 +1594,7 @@ static void initSimInterface()
 
 static void initConnManager()
 {
+    LOGD("initConnManager");
     // DataConnectionManager
     connman = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_CONNMAN);
     if (connman) {
@@ -1609,8 +1611,19 @@ static void initConnManager()
     }
 
     // find existing context
+#if 0
+    LOGD("Trying to find existing context");
     char *pdcPath = NULL;
-    GHashTable *dictProp = iface_get_properties(connman);
+    GPtrArray *arrContexts = 0;
+    if (!dbus_g_proxy_call(proxy, "GetContexts", &error, G_TYPE_INVALID,
+                           G_
+                           /*dbus_g_type_get_map("GHashTable", G_TYPE_STRING, G_TYPE_VALUE)*/, &arrContexts,
+                           G_TYPE_INVALID))
+    {
+        LOGE("initConnManager: GetContexts error: %s", error->message);
+        return;
+    }
+
     GValue *valContexts = (GValue *) g_hash_table_lookup(dictProp, "PrimaryContexts");
     GPtrArray *arrContextPaths = g_value_peek_pointer(valContexts);
     LOGD("arrContextPaths: %d entries", arrContextPaths->len);
@@ -1653,7 +1666,7 @@ static void initConnManager()
     }
     else
         LOGE("Failed to create PrimaryDataContext proxy object");
-
+#endif
 }
 
 static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
@@ -1791,19 +1804,33 @@ static int initOfono()
     }
     LOGD("proxy manager - ok");
 
-    GHashTable *dict = iface_get_properties(manager);
-    GValue *value = (GValue *) g_hash_table_lookup(dict, "Modems");
-    GPtrArray *modemArr = g_value_peek_pointer(value);
 
-    if (!modemArr->len) {
-        LOGE("modemArr->len is empty. Probably, modem isn't detected yet.");
+    GType a = dbus_g_type_get_struct("GValueArray",
+                                     DBUS_TYPE_G_OBJECT_PATH,
+                                     dbus_g_type_get_map("GHashTable", G_TYPE_STRING, G_TYPE_VALUE),
+                                     G_TYPE_INVALID);
+
+    GType t = dbus_g_type_get_collection("GPtrArray", a);
+
+    GPtrArray *modems = 0;
+    if (!dbus_g_proxy_call(manager, "GetModems", &error, G_TYPE_INVALID,
+                           t, &modems,
+                           G_TYPE_INVALID))
+    {
+        LOGE(".GetModems failed: %s", error->message);
         return 0;
     }
 
-    const char *modemName = g_ptr_array_index(modemArr, 0);
-    LOGD("ofono modem:%s\n", modemName);
-    if (strstr("isimodem", modemName) != 0) {
-        LOGE("Modem name dosn't match: %s, but we expect \"%s\"", modemName, MODEM);
+    if (!modems || !modems->len) {
+        LOGE("modems->len is empty. Probably, modem isn't detected yet.");
+        return 0;
+    }
+
+    GValueArray *mdm = g_ptr_array_index(modems, 0);
+    const char *modemPath = g_value_get_boxed(g_value_array_get_nth(mdm, 0));
+    if (g_strcmp0(MODEM, modemPath) != 0) {
+        LOGE("Modem path dosn't match: \"%s\", but we expect \"%s\"", modemPath, MODEM);
+        return 0;
     }
 
     error = NULL;

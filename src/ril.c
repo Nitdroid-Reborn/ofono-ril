@@ -92,8 +92,8 @@ const gchar OFONO_IFACE_CALL[] = "org.ofono.VoiceCall";
 const gchar OFONO_IFACE_CALLMAN[] = "org.ofono.VoiceCallManager";
 const gchar OFONO_IFACE_SIMMANAGER[] = "org.ofono.SimManager";
 const gchar OFONO_IFACE_NETREG[] = "org.ofono.NetworkRegistration";
-const gchar OFONO_IFACE_SMSMAN[] = "org.ofono.SmsManager";
-const gchar OFONO_IFACE_CONNMAN[] = "org.ofono.DataConnectionManager";
+const gchar OFONO_IFACE_SMSMAN[] = "org.ofono.MessageManager";
+const gchar OFONO_IFACE_CONNMAN[] = "org.ofono.ConnectionManager2";
 const gchar OFONO_IFACE_PDC[] = "org.ofono.PrimaryDataContext";
 const gchar OFONO_IFACE_SUPSRV[] = "org.ofono.SupplementaryServices";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
@@ -277,7 +277,7 @@ static void call_answer(const gchar *callPath, int answerOrHangup)
 
 static inline int call_to_rilcall(int index)
 {
-    //LOGD("call_to_rilcall(%d)", index);
+    LOGD("call_to_rilcall(%d)", index);
 
     GHashTable *dict = iface_get_properties(orCalls[index].obj);
     if (!dict)
@@ -357,34 +357,20 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
     int i;
     int needRepoll = 0;
 
+    LOGD("requestGetCurrentCalls");
     if (!vcm) {
         LOGE("!VCM");
-        RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, 0, 0);
+        RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
         return;
     }
 
-    /* get the calls */
-    GHashTable *dict = iface_get_properties(vcm);
-    if (!dict) {
-        LOGE("vcm.GetProperties failed");
-        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, 0, 0);
-        return;
-    }
-    
-    GValue *value = (GValue *) g_hash_table_lookup(dict, "Calls");
-    GPtrArray *callsArr = g_value_peek_pointer(value);
-    countCalls = callsArr->len;
-    
-    /* yes, there's an array of pointers and then an array of structures */
-
+    countCalls = 8;
     pp_calls = (RIL_Call **)alloca(countCalls * sizeof(RIL_Call *));
-    //p_calls = (RIL_Call *)alloca(countCalls * sizeof(RIL_Call));
-    //memset (p_calls, 0, countCalls * sizeof(RIL_Call));
 
     /* init the pointer array */
     for(i = 0; i < 8 ; i++) {
         pp_calls[validCalls] = &orCalls[i].rilCall;
-        if (call_to_rilcall(/*g_ptr_array_index(callsArr, i)*/ i/*, &(p_calls[validCalls])*/)) {
+        if (call_to_rilcall(i)) {
             ++validCalls;
         }
     }
@@ -394,8 +380,6 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
                           validCalls * sizeof (RIL_Call *));
 
     return;
-error:
-    RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
 static void requestDial(void *data, size_t datalen, RIL_Token t)
@@ -1421,24 +1405,15 @@ static void smsIncomingMessage(DBusGProxy *proxy, const gchar *message,
     g_hash_table_foreach(dict, (GHFunc)hash_entry_gvalue_print, NULL);
     GValue *sender = g_hash_table_lookup(dict, "Sender");
 
-    // pdu encoder able to encode only to ucs2 encoding (2bytes/char),
-    // but length field stored as uint8.
-    // Cut down size of the message (better than drop it).
-    char *msg = (char*)message;
-    if (strlen(message) > 254/2) {
-        msg = strdup(message);
-        msg[126] = 0;
-    }
-
-    if (sender && encodePDU(pdu, msg, "+79168999100", g_value_peek_pointer(sender))) {
-        LOGD("PDU: %s", pdu);
-        RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_NEW_SMS, pdu, sizeof(char*));
+    if (sender) {
+        if (encodePDU(pdu, message, "+79168999100", g_value_peek_pointer(sender))) {
+            LOGD("PDU: %s", pdu);
+            RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_NEW_SMS, pdu, sizeof(char*));
+        }
         g_value_unset(sender);
     }
-    g_hash_table_destroy(dict);
+    //g_hash_table_destroy(dict);
     free(pdu);
-    if (msg != message)
-        free(msg);
 }
 
 static void connman_property_changed(DBusGProxy *proxy, const gchar *property,

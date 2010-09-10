@@ -105,10 +105,16 @@ int encodePDU(unsigned char *pdu, const char *message, const char *smsc, const c
                                    NULL, &converted, NULL);
 
     if (!ucs2_encoded || !converted || converted > 255) {
-        LOGE("!ucs2_encoded || !converted");
+        LOGE("!ucs2_encoded (%p) || !converted (%d)", ucs2_encoded, (int)converted);
         return 0;
     }
     LOGD("UCS2 length: %d %d", (int)converted, ofs);
+
+    // pdu encoder able to encode only to ucs2 encoding (2bytes/char),
+    // but length field stored as uint8.
+    // Cut down size of the message (better than drop it).
+    if (converted > 254)
+        converted = 254;
 
     setOctet(pdu, &ofs, (guint8)converted); // TP-TP-User-Data-Length
     const char *strPtr = ucs2_encoded;

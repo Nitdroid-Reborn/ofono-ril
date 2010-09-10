@@ -359,7 +359,7 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 
     if (!vcm) {
         LOGE("!VCM");
-        RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
+        RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, 0, 0);
         return;
     }
 
@@ -367,7 +367,7 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
     GHashTable *dict = iface_get_properties(vcm);
     if (!dict) {
         LOGE("vcm.GetProperties failed");
-        RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
+        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, 0, 0);
         return;
     }
     
@@ -1155,7 +1155,7 @@ static void onCancel (RIL_Token t)
 
 static const char * getVersion(void)
 {
-    return "NitDroid ofono-ril 0.0.1";
+    return "NitDroid ofono-ril 0.0.3";
 }
 
 void
@@ -1369,6 +1369,14 @@ static void sim_property_changed(DBusGProxy *proxy, const gchar *property,
 {
     // XXX
     LOGW("sim_property_changed %s->%s", property, g_strdup_value_contents(value));
+
+    // sometimes we don't have IMSI at interface creation time
+    // may be property is changing now?
+    if (!simIMSI[0] && !g_strcmp0(property, "SubscriberIdentity")) {
+        strncpy(simIMSI, g_value_peek_pointer(value), sizeof(simIMSI));
+        //simStatus = SIM_READY;
+    }
+
     g_value_unset(value);
 }
 
@@ -1407,7 +1415,7 @@ static void smsIncomingMessage(DBusGProxy *proxy, const gchar *message,
                                GHashTable *dict, gpointer userData)
 {
     // TODO: more accurate guess about buffer length
-    unsigned char *pdu = malloc(120 + strlen(message)*2);
+    unsigned char *pdu = malloc(240 + strlen(message)*2);
 
     LOGD("smsIncomingMessage: %s", message);
     g_hash_table_foreach(dict, (GHFunc)hash_entry_gvalue_print, NULL);

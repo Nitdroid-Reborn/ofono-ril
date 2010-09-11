@@ -95,7 +95,7 @@ const gchar OFONO_IFACE_SIMMANAGER[] = "org.ofono.SimManager";
 const gchar OFONO_IFACE_NETREG[] = "org.ofono.NetworkRegistration";
 const gchar OFONO_IFACE_SMSMAN[] = "org.ofono.MessageManager";
 const gchar OFONO_IFACE_CONNMAN[] = "org.ofono.ConnectionManager";
-const gchar OFONO_IFACE_PDC[] = "org.ofono.PrimaryDataContext";
+const gchar OFONO_IFACE_PDC[] = "org.ofono.ConnectionContext";
 const gchar OFONO_IFACE_SUPSRV[] = "org.ofono.SupplementaryServices";
 const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
 const gchar OFONO_SIGNAL_DISCONNECT_REASON[] = "DisconnectReason";
@@ -106,6 +106,7 @@ const gchar OFONO_SIGNAL_REQUEST_RECEIVED[] = "RequestReceived";
 static ORIL_Call orCalls[8];
 static GMainLoop *loop;
 static DBusGConnection *connection;
+static GType type_a_oa_sv;
 static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *sms, *connman, *pdc, *supsrv;
 static int goingOnline = 0;
 static gboolean screenState = TRUE;
@@ -1611,27 +1612,24 @@ static void initConnManager()
     }
 
     // find existing context
-#if 0
     LOGD("Trying to find existing context");
     char *pdcPath = NULL;
     GPtrArray *arrContexts = 0;
-    if (!dbus_g_proxy_call(proxy, "GetContexts", &error, G_TYPE_INVALID,
-                           G_
-                           /*dbus_g_type_get_map("GHashTable", G_TYPE_STRING, G_TYPE_VALUE)*/, &arrContexts,
+    GError *error = NULL;
+    if (!dbus_g_proxy_call(connman, "GetContexts", &error, G_TYPE_INVALID,
+                           type_a_oa_sv, &arrContexts,
                            G_TYPE_INVALID))
     {
         LOGE("initConnManager: GetContexts error: %s", error->message);
-        return;
+        LOGW("New context will be created");
     }
 
-    GValue *valContexts = (GValue *) g_hash_table_lookup(dictProp, "PrimaryContexts");
-    GPtrArray *arrContextPaths = g_value_peek_pointer(valContexts);
-    LOGD("arrContextPaths: %d entries", arrContextPaths->len);
     // we'll use first found context
-    if (arrContextPaths->len)
-        pdcPath = g_strdup((const char*) g_ptr_array_index(arrContextPaths, 0));
-
-    g_hash_table_destroy(dictProp);
+    if (arrContexts && arrContexts->len) {
+        GValueArray *ctx = g_ptr_array_index(arrContexts, 0);
+        pdcPath = g_strdup(g_value_get_boxed(g_value_array_get_nth(ctx, 0)));
+        LOGD("existing pdcPath: %s", pdcPath);
+    }
 
     if (!pdcPath) {
         // create new context if nothing found
@@ -1666,7 +1664,6 @@ static void initConnManager()
     }
     else
         LOGE("Failed to create PrimaryDataContext proxy object");
-#endif
 }
 
 static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
@@ -1810,11 +1807,11 @@ static int initOfono()
                                      dbus_g_type_get_map("GHashTable", G_TYPE_STRING, G_TYPE_VALUE),
                                      G_TYPE_INVALID);
 
-    GType t = dbus_g_type_get_collection("GPtrArray", a);
+    type_a_oa_sv = dbus_g_type_get_collection("GPtrArray", a);
 
     GPtrArray *modems = 0;
     if (!dbus_g_proxy_call(manager, "GetModems", &error, G_TYPE_INVALID,
-                           t, &modems,
+                           type_a_oa_sv, &modems,
                            G_TYPE_INVALID))
     {
         LOGE(".GetModems failed: %s", error->message);

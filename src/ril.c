@@ -1584,7 +1584,6 @@ static void initSimInterface()
         }
         else {
             LOGE("No SubscriberIdentity! SIM is locked?");
-            simStatus = SIM_PIN;
         }
 
         g_hash_table_destroy(dict);

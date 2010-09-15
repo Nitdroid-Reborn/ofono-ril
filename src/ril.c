@@ -41,6 +41,7 @@
 #include <glib/gthread.h>
 //#include <glib/gtypes.h>
 #include <dbus/dbus-glib.h>
+#include <dbus/dbus-gobject.h>
 
 #include "marshaller.h"
 
@@ -101,12 +102,14 @@ const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
 const gchar OFONO_SIGNAL_DISCONNECT_REASON[] = "DisconnectReason";
 const gchar OFONO_SIGNAL_IMMEDIATE_MESSAGE[] = "ImmediateMessage";
 const gchar OFONO_SIGNAL_INCOMING_MESSAGE[] = "IncomingMessage";
+const gchar OFONO_SIGNAL_CALL_ADDED[] = "CallAdded";
+const gchar OFONO_SIGNAL_CALL_REMOVED[] = "CallRemoved";
 const gchar OFONO_SIGNAL_REQUEST_RECEIVED[] = "RequestReceived";
 
 static ORIL_Call orCalls[8];
 static GMainLoop *loop;
 static DBusGConnection *connection;
-static GType type_a_oa_sv;
+static GType type_a_oa_sv, type_oa_sv, type_a_sv;
 static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *sms, *connman, *pdc, *supsrv;
 static int goingOnline = 0;
 static gboolean screenState = TRUE;
@@ -1332,7 +1335,7 @@ static void call_disconnect_reason(DBusGProxy *proxy, const gchar *reason,
     LOGW("call_disconnect_reason: %s", reason);
 }
 
-static void vcm_property_changed(DBusGProxy *proxy, const gchar *property,
+static void vcmPropertyChanged(DBusGProxy *proxy, const gchar *property,
                                  GValue *value, gpointer user_data)
 {
     // XXX
@@ -1348,6 +1351,18 @@ static void vcm_property_changed(DBusGProxy *proxy, const gchar *property,
                                   NULL, 0);
     }
     g_value_unset(value);
+}
+
+static void vcmCallAdded(DBusGProxy *proxy, char *objPath,
+                         GHashTable *dict, gpointer user_data)
+{
+    LOGD("vcmCallAdded: %s", objPath);
+    g_hash_table_foreach(dict, (GHFunc)hash_entry_gvalue_print, NULL);
+}
+
+static void vcmCallRemoved(DBusGProxy *proxy, char *objPath, gpointer user_data)
+{
+    LOGD("vcmCallRemoved: %s", objPath);
 }
 
 static void sim_property_changed(DBusGProxy *proxy, const gchar *property,
@@ -1505,10 +1520,31 @@ static void initVoiceCallInterfaces()
 {
     vcm = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_CALLMAN);
     if (vcm) {
-        dbus_g_proxy_add_signal(vcm, OFONO_SIGNAL_PROPERTY_CHANGED, G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+        // VoiceCallManager.PropertyChanged
+        dbus_g_proxy_add_signal(vcm, OFONO_SIGNAL_PROPERTY_CHANGED,
+                                G_TYPE_STRING, G_TYPE_VALUE,
+                                G_TYPE_INVALID);
+
         dbus_g_proxy_connect_signal(vcm,
                                     OFONO_SIGNAL_PROPERTY_CHANGED,
-                                    G_CALLBACK(vcm_property_changed), vcm, NULL);
+                                    G_CALLBACK(vcmPropertyChanged), vcm, NULL);
+
+        // VoiceCallManager.CallAdded
+        dbus_g_proxy_add_signal(vcm, OFONO_SIGNAL_CALL_ADDED,
+                                DBUS_TYPE_G_OBJECT_PATH, type_a_sv,
+                                G_TYPE_INVALID);
+
+        dbus_g_proxy_connect_signal(vcm,
+                                    OFONO_SIGNAL_CALL_ADDED,
+                                    G_CALLBACK(vcmCallAdded), vcm, NULL);
+
+        // VoiceCallManager.CallRemoved
+        dbus_g_proxy_add_signal(vcm, OFONO_SIGNAL_CALL_REMOVED,
+                                DBUS_TYPE_G_OBJECT_PATH, G_TYPE_INVALID);
+
+        dbus_g_proxy_connect_signal(vcm,
+                                    OFONO_SIGNAL_CALL_REMOVED,
+                                    G_CALLBACK(vcmCallRemoved), vcm, NULL);
     }
     else
         LOGE("Failed to create VCM proxy object");
@@ -1634,7 +1670,7 @@ static void initConnManager()
         // create new context if nothing found
         GError *error = NULL;
         LOGD("ConnMan.CreateContext preparing for crash...");
-        if ( !dbus_g_proxy_call(connman, "CreateContext", &error,
+        if ( !dbus_g_proxy_call(connman, "AddContext", &error,
                                 G_TYPE_STRING, "internet",
                                 G_TYPE_STRING, "internet",
                                 G_TYPE_INVALID,
@@ -1800,14 +1836,6 @@ static int initOfono()
     }
     LOGD("proxy manager - ok");
 
-
-    GType a = dbus_g_type_get_struct("GValueArray",
-                                     DBUS_TYPE_G_OBJECT_PATH,
-                                     dbus_g_type_get_map("GHashTable", G_TYPE_STRING, G_TYPE_VALUE),
-                                     G_TYPE_INVALID);
-
-    type_a_oa_sv = dbus_g_type_get_collection("GPtrArray", a);
-
     GPtrArray *modems = 0;
     if (!dbus_g_proxy_call(manager, "GetModems", &error, G_TYPE_INVALID,
                            type_a_oa_sv, &modems,
@@ -1853,8 +1881,6 @@ pthread_t s_tid_mainloop;
 const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **argv)
 {
     int ret;
-    int fd = -1;
-    int opt;
     pthread_attr_t attr;
 
     s_rilenv = env;
@@ -1866,10 +1892,27 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
     }
     g_type_init();
 
+    // types for DBus
+    type_a_sv = dbus_g_type_get_map("GHashTable", G_TYPE_STRING, G_TYPE_VALUE);
+
+    type_oa_sv = dbus_g_type_get_struct("GValueArray",
+                                     DBUS_TYPE_G_OBJECT_PATH,
+                                     type_a_sv,
+                                     G_TYPE_INVALID);
+
+    type_a_oa_sv = dbus_g_type_get_collection("GPtrArray", type_oa_sv);
+
+    // marshallers
     dbus_g_object_register_marshaller(g_cclosure_user_marshal_VOID__STRING_BOXED,
                                       G_TYPE_NONE,
                                       G_TYPE_STRING,
                                       G_TYPE_VALUE,
+                                      G_TYPE_INVALID);
+
+    dbus_g_object_register_marshaller(g_cclosure_user_marshal_VOID__STRING_BOXED,
+                                      G_TYPE_NONE,
+                                      DBUS_TYPE_G_OBJECT_PATH,
+                                      type_a_sv,
                                       G_TYPE_INVALID);
 
     loop = g_main_loop_new (NULL, FALSE);
@@ -1890,7 +1933,6 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 int main (int argc, char **argv)
 {
     int ret;
-    int fd = -1;
     int opt;
 
     while ( -1 != (opt = getopt(argc, argv, "p:d:"))) {

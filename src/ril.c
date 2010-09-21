@@ -446,14 +446,30 @@ error:
 
 static void requestHangup(void *data, size_t datalen, RIL_Token t)
 {
-    char *path;
-    int *p_line = (int *)data;
+    GSList *l;
+    int found = 0;
+    int line = ((int *)data)[0];
 
     // 3GPP 22.030 6.5.5
     // "Releases a specific active call X"
-    asprintf(&path, "%s/voicecall%02d", MODEM, p_line[0]);
-    call_answer(path, 0);
-    free(path);
+    // ril.h: Hang up a specific line (like AT+CHLD=1x)
+
+    pthread_mutex_lock(&lock);
+    for (l = voiceCalls; l; l = l->next) {
+        ORIL_Call *call = (ORIL_Call*) l->data;
+        if (line == call->rilCall.index) {
+            found = 1;
+            GError *error = NULL;
+            if (!dbus_g_proxy_call(call->obj, "Hangup", &error, G_TYPE_INVALID, G_TYPE_INVALID))
+                LOGE("VoiceCall.Hangup failed for line %d: %s", line, error->message);
+            RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED, 0, 0);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&lock);
+
+    if (!found)
+        LOGW("requestHangup failed: line %d not found", line);
 
     /* success or failure is ignored by the upper layer here.
        it will call GET_CURRENT_CALLS and determine success that way */
@@ -1144,7 +1160,7 @@ static void onCancel (RIL_Token t)
 
 static const char * getVersion(void)
 {
-    return "NitDroid ofono-ril 0.0.3";
+    return "NitDroid ofono-ril 0.0.5";
 }
 
 void

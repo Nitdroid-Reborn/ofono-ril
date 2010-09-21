@@ -57,7 +57,6 @@ typedef enum {
 } SIM_Status;
 
 static GHashTable* iface_get_properties(DBusGProxy *proxy);
-static GHashTable* name_get_properties(const gchar *objPath, const gchar *ifaceName);
 
 static void onRequest (int request, void *data, size_t datalen, RIL_Token t);
 static RIL_RadioState currentState();
@@ -283,55 +282,6 @@ static void call_answer(const gchar *callPath, int answerOrHangup)
         LOGE("Failed to create Call proxy object: %s", error->message);
 }
 
-#if 0
-static inline int call_to_rilcall(int index)
-{
-    LOGD("call_to_rilcall(%d)", index);
-
-    GHashTable *dict = iface_get_properties(orCalls[index].obj);
-    if (!dict)
-        return 0;
-
-    GValue *valueState = (GValue *) g_hash_table_lookup(dict, "State");
-    orCalls[index].rilCall.state = ofonoStateToRILState(g_value_peek_pointer(valueState));
-    g_value_unset(valueState);
-
-#if 1
-    if (RIL_CALL_INCOMING == orCalls[index].rilCall.state ||
-        RIL_CALL_WAITING == orCalls[index].rilCall.state)
-        orCalls[index].rilCall.isMT = 1;
-    else if (RIL_CALL_DIALING == orCalls[index].rilCall.state ||
-             RIL_CALL_ALERTING == orCalls[index].rilCall.state)
-             orCalls[index].rilCall.isMT = 0;
-#endif
-
-    GValue *valueId = (GValue *) g_hash_table_lookup(dict, "LineIdentification");
-    const char *id = g_value_peek_pointer(valueId);
-    strncpy(orCalls[index].number, id ? id : "", sizeof(orCalls[index].number));
-    g_value_unset(valueId);
-    
-    LOGD("Call state: %u, LineIdentification: %s, MT: %d",
-         orCalls[index].rilCall.state,
-         orCalls[index].number,
-         orCalls[index].rilCall.isMT);
-
-    if (orCalls[index].rilCall.state == 0xffffffff)
-        return 0;
-
-    orCalls[index].rilCall.index = index + 1;
-    orCalls[index].rilCall.toa = 145;
-    orCalls[index].rilCall.isVoice = 1;
-    orCalls[index].rilCall.number = orCalls[index].number;
-
-    /* Presentation: 0=Allowed, 1=Restricted, 2=Not Specified/Unknown 3=Payphone */
-    orCalls[index].rilCall.namePresentation = 2;
-    orCalls[index].rilCall.numberPresentation = strlen(orCalls[index].number) ? 0 : 2;
-
-    LOGD("+ %d (%s), presentation: %d", index, orCalls[index].objPath, orCalls[index].rilCall.numberPresentation);
-    return 1;
-}
-#endif
-
 static GHashTable* iface_get_properties(DBusGProxy *proxy)
 {
     GError *error = NULL;
@@ -345,17 +295,6 @@ static GHashTable* iface_get_properties(DBusGProxy *proxy)
     }
 
     return dict;
-}
-
-static GHashTable* name_get_properties(const gchar *objPath, const gchar *ifaceName)
-{
-    GError *error = NULL;
-    DBusGProxy *obj = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, objPath, ifaceName);
-    if (obj)
-        return iface_get_properties(obj);
-
-    LOGE("Failed to create Call proxy object: %s", error->message);
-    return 0;
 }
 
 static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)

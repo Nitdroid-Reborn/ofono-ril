@@ -39,7 +39,6 @@
 #include <utils/Log.h>
 
 #include <glib/gthread.h>
-//#include <glib/gtypes.h>
 #include <dbus/dbus-glib.h>
 #include <dbus/dbus-gobject.h>
 
@@ -127,12 +126,12 @@ static char netregMCC[4], netregMNC[4];
 /* DataConnectionManager */
 static gboolean connmanAttached = FALSE;
 // XXX not thread safe?
-char ipDataCall[16];
-const char gprsIfName[] = "gprs0";
+static char ipDataCall[16];
+static const char gprsIfName[] = "gprs0";
 // we always use only one context for PDC: primarycontext1
-const char *responseDataCall[3] = { "1", gprsIfName, ipDataCall };
-RIL_Token dataCallToken, poweredToken, imeiToken;
-gboolean pdcActive = FALSE;
+static const char *responseDataCall[3] = { "1", gprsIfName, ipDataCall };
+static RIL_Token dataCallToken, poweredToken, imeiToken;
+static gboolean pdcActive = FALSE;
 
 #ifdef RIL_SHLIB
 static const struct RIL_Env *s_rilenv;

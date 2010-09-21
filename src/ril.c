@@ -1271,12 +1271,28 @@ static void callPropertyChanged(DBusGProxy *proxy, const gchar *property,
     LOGD("callPropertyChanged(%d): %s->%s", callIndex, property, (char*)g_value_peek_pointer(value));
 
     if (!g_strcmp0(property, "State")) {
-        //orCalls[callIndex].rilCall.state = ofonoStateToRILState(g_value_peek_pointer(value));
+        GSList *l;
+        int found = 0;
+        RIL_CallState state = 0xffffffff;
 
-        // for disconnected calls we'll send it on vcm->OnStateChange("Calls") signal
-        //if (0xffffffff != (unsigned int)orCalls[callIndex].rilCall.state)
-        //RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
-        //NULL, 0);
+        pthread_mutex_lock(&lock);
+        for (l = voiceCalls; l; l = l->next) {
+            ORIL_Call *call = (ORIL_Call*) l->data;
+            if (proxy == call->obj) {
+                found = 1;
+                state = ofonoStateToRILState(g_value_peek_pointer(value));
+                call->rilCall.state = state;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&lock);
+
+        // for disconnected calls we'll send it on vcm->CallRemoved signal
+        if (0xffffffff != (unsigned int)state)
+            RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED, NULL, 0);
+
+        if (!found)
+            LOGW("BUG? Call not found");
     }
 
     g_value_unset(value);

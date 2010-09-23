@@ -355,6 +355,31 @@ static void requestDial(void *data, size_t datalen, RIL_Token t)
     RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 }
 
+static void requestDTMF(void *data, size_t datalen, RIL_Token t)
+{
+    char tones[2];
+    GError *error = NULL;
+    RIL_Errno res = RIL_E_SUCCESS;
+
+    if (!vcm) {
+        RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
+        return;
+    }
+
+    // "data" is a char * containing a single character with one of 12 values: 0-9,*,#
+    tones[0] = *((char*)data);
+    tones[1] = '\0';
+
+    if (!dbus_g_proxy_call(vcm, "SendTones", &error,
+                           G_TYPE_STRING, tones,
+                           G_TYPE_INVALID, G_TYPE_INVALID)) {
+        LOGE("VoiceCallManager.SendTones failed: %s", error->message);
+        res = RIL_E_GENERIC_FAILURE;
+    }
+
+    RIL_onRequestComplete(t, res, NULL, 0);
+}
+
 static void requestWriteSmsToSim(void *data, size_t datalen, RIL_Token t)
 {
 #if 0
@@ -459,6 +484,8 @@ static void requestRegistrationState(void *data, size_t datalen, RIL_Token t)
         asprintf(&responseStr[3], "%d", connmanAttached ? 2 : 1); // Technology: EDGE
         LOGD("requestRegistrationState success");
         RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, sizeof(responseStr));
+        for (unsigned i = 0; i < sizeof(responseStr)/sizeof(char*); i++)
+            if (responseStr[i]) free(responseStr[i]);
     }
     else
         RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
@@ -947,15 +974,10 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
         case RIL_REQUEST_RADIO_POWER:
             requestRadioPower(data, datalen, t);
             break;
-        case RIL_REQUEST_DTMF: {
-            char c = ((char *)data)[0];
-            char *cmd;
-            asprintf(&cmd, "AT+VTS=%c", (int)c);
-            //at_send_command(cmd, NULL);
-            free(cmd);
-            RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+        case RIL_REQUEST_DTMF:
+        case RIL_REQUEST_DTMF_START:
+            requestDTMF(data, datalen, t);
             break;
-        }
         case RIL_REQUEST_SEND_SMS:
             requestSendSMS(data, datalen, t);
             break;
@@ -1098,7 +1120,7 @@ static void onCancel (RIL_Token t)
 
 static const char * getVersion(void)
 {
-    return "NitDroid ofono-ril 0.0.5";
+    return "NitDroid ofono-ril 0.0.6";
 }
 
 void

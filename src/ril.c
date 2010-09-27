@@ -267,18 +267,31 @@ static void sendNetworkStateChanged()
         NULL, 0);
 }
 
-static void call_answer(const gchar *callPath, int answerOrHangup)
+static void requestAnswer(RIL_Token t)
 {
-    const gchar *method = answerOrHangup ? "Answer" : "Hangup";
     GError *error = NULL;
-    DBusGProxy *call = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, callPath, OFONO_IFACE_CALL);
-    if (call) {
-        if (!dbus_g_proxy_call(call, method, &error, G_TYPE_INVALID, G_TYPE_INVALID))
-            LOGE("Call->%s failed for %s: %s", method, callPath, error->message);
-        RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED, 0, 0);
+    GSList *l;
+    int found = 0;
+
+    pthread_mutex_lock(&lock);
+    for (l = voiceCalls; l; l = l->next) {
+        ORIL_Call *call = (ORIL_Call*) l->data;
+        if (RIL_CALL_INCOMING == call->rilCall.state) {
+            found = 1;
+            if (!dbus_g_proxy_call(call->obj, "Answer", &error, G_TYPE_INVALID, G_TYPE_INVALID))
+                LOGE("Call->Answer failed: %s", error->message);
+            RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED, 0, 0);
+            break;
+        }
     }
-    else
-        LOGE("Failed to create Call proxy object: %s", error->message);
+    pthread_mutex_unlock(&lock);
+
+    if (!found)
+        LOGW("Can't answer: call not found");
+
+    /* success or failure is ignored by the upper layer here.
+       it will call GET_CURRENT_CALLS and determine success that way */
+    RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 }
 
 static GHashTable* iface_get_properties(DBusGProxy *proxy)
@@ -407,11 +420,16 @@ error:
     RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
-static void requestHangup(void *data, size_t datalen, RIL_Token t)
+/**
+ * Hangup a call
+ *
+ * @line   calling line index, if 0 will hangup calls with state
+ * @state  hangup calls with certain state (when line is 0)
+ */
+static void requestHangup(RIL_Token t, int line, int state)
 {
     GSList *l;
     int found = 0;
-    int line = ((int *)data)[0];
 
     // 3GPP 22.030 6.5.5
     // "Releases a specific active call X"
@@ -420,7 +438,7 @@ static void requestHangup(void *data, size_t datalen, RIL_Token t)
     pthread_mutex_lock(&lock);
     for (l = voiceCalls; l; l = l->next) {
         ORIL_Call *call = (ORIL_Call*) l->data;
-        if (line == call->rilCall.index) {
+        if (line == call->rilCall.index || (!line && (RIL_CallState) state == call->rilCall.state)) {
             found = 1;
             GError *error = NULL;
             if (!dbus_g_proxy_call(call->obj, "Hangup", &error, G_TYPE_INVALID, G_TYPE_INVALID))
@@ -432,7 +450,7 @@ static void requestHangup(void *data, size_t datalen, RIL_Token t)
     pthread_mutex_unlock(&lock);
 
     if (!found)
-        LOGW("requestHangup failed: line %d not found", line);
+        LOGW("requestHangup failed: line/state %d/%d not found", line, state);
 
     /* success or failure is ignored by the upper layer here.
        it will call GET_CURRENT_CALLS and determine success that way */
@@ -867,28 +885,21 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             requestDial(data, datalen, t);
             break;
         case RIL_REQUEST_HANGUP:
-            requestHangup(data, datalen, t);
+            requestHangup(t, *((int *)data), -1);
             break;
         case RIL_REQUEST_HANGUP_WAITING_OR_BACKGROUND:
             // 3GPP 22.030 6.5.5
             // "Releases all held calls or sets User Determined User Busy
             //  (UDUB) for a waiting call."
             //at_send_command("AT+CHLD=0", NULL);
-
-            /* success or failure is ignored by the upper layer here.
-               it will call GET_CURRENT_CALLS and determine success that way */
-            //RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
-            //break;
+            requestHangup(t, 0, RIL_CALL_INCOMING); // FIXME
+            break;
         case RIL_REQUEST_HANGUP_FOREGROUND_RESUME_BACKGROUND:
             // 3GPP 22.030 6.5.5
             // "Releases all active calls (if any exist) and accepts
             //  the other (held or waiting) call."
             //at_send_command("AT+CHLD=1", NULL);
-
-            /* success or failure is ignored by the upper layer here.
-               it will call GET_CURRENT_CALLS and determine success that way */
-            call_answer("/isimodem/voicecall01", 0);
-            RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+            requestHangup(t, 0, RIL_CALL_ACTIVE); // FIXME
             break;
         case RIL_REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE:
             // 3GPP 22.030 6.5.5
@@ -896,24 +907,10 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             //  the other (held or waiting) call."
             //at_send_command("AT+CHLD=2", NULL);
 
-#ifdef WORKAROUND_ERRONEOUS_ANSWER
-            s_expectAnswer = 1;
-#endif /* WORKAROUND_ERRONEOUS_ANSWER */
-
-            /* success or failure is ignored by the upper layer here.
-               it will call GET_CURRENT_CALLS and determine success that way */
             RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
             break;
         case RIL_REQUEST_ANSWER:
-            call_answer("/isimodem/voicecall01", 1);
-
-#ifdef WORKAROUND_ERRONEOUS_ANSWER
-            s_expectAnswer = 1;
-#endif /* WORKAROUND_ERRONEOUS_ANSWER */
-
-            /* success or failure is ignored by the upper layer here.
-               it will call GET_CURRENT_CALLS and determine success that way */
-            RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+            requestAnswer(t);
             break;
         case RIL_REQUEST_CONFERENCE:
             // 3GPP 22.030 6.5.5

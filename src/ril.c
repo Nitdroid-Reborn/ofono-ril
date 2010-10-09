@@ -97,6 +97,7 @@ static const gchar OFONO_IFACE_SMSMAN[] = "org.ofono.MessageManager";
 static const gchar OFONO_IFACE_CONNMAN[] = "org.ofono.ConnectionManager";
 static const gchar OFONO_IFACE_PDC[] = "org.ofono.ConnectionContext";
 static const gchar OFONO_IFACE_SUPSRV[] = "org.ofono.SupplementaryServices";
+static const gchar OFONO_IFACE_AUDIOSETTINGS[] = "org.ofono.AudioSettings";
 static const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
 static const gchar OFONO_SIGNAL_DISCONNECT_REASON[] = "DisconnectReason";
 static const gchar OFONO_SIGNAL_IMMEDIATE_MESSAGE[] = "ImmediateMessage";
@@ -109,7 +110,8 @@ static GSList *voiceCalls;
 static GMainLoop *loop;
 static DBusGConnection *connection;
 static GType type_a_oa_sv, type_oa_sv, type_a_sv;
-static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *sms, *connman, *pdc, *supsrv;
+static DBusGProxy *manager, *modem, *vcm, *sim, *netreg;
+static DBusGProxy *sms, *connman, *pdc, *supsrv, *audioSettings;
 static int goingOnline = 0;
 static gboolean screenState = TRUE;
 static int lastCallFailCause;
@@ -1436,6 +1438,13 @@ static void vcmCallRemoved(DBusGProxy *proxy, const char *objPath, gpointer priv
         LOGE("call not found: %s", objPath);
 }
 
+static void audioSettingsPropertyChanged(DBusGProxy *proxy, const gchar *property,
+                                         GValue *value, gpointer priv)
+{
+    // XXX
+    LOGW("audioSettingsPropertyChanged %s->%s", property, g_strdup_value_contents(value));
+}
+
 static void sim_property_changed(DBusGProxy *proxy, const gchar *property,
                                  GValue *value, gpointer user_data)
 {
@@ -1838,6 +1847,19 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                 }
                 else
                     LOGE("Failed to create SupplementaryServices proxy object");
+            }
+            else if (!audioSettings && !g_strcmp0(*ifArr, OFONO_IFACE_AUDIOSETTINGS)) {
+                audioSettings = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_AUDIOSETTINGS);
+                if (audioSettings) {
+                    dbus_g_proxy_add_signal(audioSettings, OFONO_SIGNAL_PROPERTY_CHANGED,
+                                            G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+                    dbus_g_proxy_connect_signal(audioSettings,
+                                                OFONO_SIGNAL_PROPERTY_CHANGED,
+                                                G_CALLBACK(audioSettingsPropertyChanged), audioSettings, NULL);
+                    LOGW("AudioSettings proxy created");
+                }
+                else
+                    LOGE("Failed to create AudioSettings proxy object");
             }
             else if (!connman && !g_strcmp0(*ifArr, OFONO_IFACE_CONNMAN)) {
                 initConnManager();

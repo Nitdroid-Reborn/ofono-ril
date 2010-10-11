@@ -31,9 +31,15 @@
 #include <alloca.h>
 #include <getopt.h>
 #include <sys/socket.h>
+#include <arpa/inet.h>
 #include <cutils/sockets.h>
-#include <netutils/ifc.h>
 #include <termios.h>
+
+#ifdef AOSP
+#include <netutils/ifc.h>
+#else
+#include <libnetutils/ifc_utils.h>
+#endif
 
 #define LOG_TAG "RIL"
 #include <utils/Log.h>

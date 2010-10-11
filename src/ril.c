@@ -469,7 +469,11 @@ static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 {
     RIL_SignalStrength st;
 
-    st.GW_SignalStrength.signalStrength = 20;
+    int strength = (netregStrength*31)/100;
+    if (strength == 0)
+      strength = 99;
+
+    st.GW_SignalStrength.signalStrength = strength;
     st.GW_SignalStrength.bitErrorRate = 0;
 
     if (t)

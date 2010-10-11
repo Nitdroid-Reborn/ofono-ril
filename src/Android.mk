@@ -33,6 +33,7 @@ LOCAL_C_INCLUDES := \
 	external/glib/glib \
 	external/glib \
 	external/glib/android \
+	system/core
 ##
 
 LOCAL_SHARED_LIBRARIES := \
@@ -48,6 +49,10 @@ LOCAL_SHARED_LIBRARIES := \
 LOCAL_STATIC_LIBRARIES := libdbus_glib
 
 LOCAL_CFLAGS := -DRIL_SHLIB -DHAVE_CONFIG_H -std=c99
+
+ifeq ($(PLATFORM_VERSION_CODENAME),AOSP)
+LOCAL_CFLAGS += -DAOSP
+endif
 
 LOCAL_LDLIBS += -lpthread
 

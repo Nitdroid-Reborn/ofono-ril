@@ -56,6 +56,12 @@ endif
 
 LOCAL_LDLIBS += -lpthread
 
+ifeq ($(TARGET_PRODUCT),n900)
+LOCAL_SRC_FILES += cmtaudio_n900.cpp
+else
+LOCAL_SRC_FILES += cmtaudio_dummy.cpp
+endif
+
 LOCAL_PRELINK_MODULE := false
 LOCAL_MODULE:= libofono-ril
 

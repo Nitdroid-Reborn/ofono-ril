@@ -49,6 +49,7 @@
 #include <dbus/dbus-gobject.h>
 
 #include "marshaller.h"
+#include "cmtaudio.h"
 
 #define G_VALUE_INITIALIZATOR {0,{{0}}}
 
@@ -893,6 +894,10 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
         case RIL_REQUEST_GET_CURRENT_CALLS:
             requestGetCurrentCalls(data, datalen, t);
             break;
+        case RIL_REQUEST_SET_MUTE:
+            cmtAudioSetMute(*((int *)data));
+            RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+            break;
         case RIL_REQUEST_DIAL:
             requestDial(data, datalen, t);
             break;
@@ -1453,6 +1458,8 @@ static void audioSettingsPropertyChanged(DBusGProxy *proxy, const gchar *propert
 {
     // XXX
     LOGW("audioSettingsPropertyChanged %s->%s", property, g_strdup_value_contents(value));
+    if (!g_strcmp0(property, "Active"))
+        cmtAudioSetActive(g_value_get_boolean(value) ? 1 : 0);
 }
 
 static void sim_property_changed(DBusGProxy *proxy, const gchar *property,
@@ -1998,6 +2005,8 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 
     loop = g_main_loop_new (NULL, FALSE);
     setRadioState(RADIO_STATE_OFF);
+
+    cmtAudioInit();
 
     if (initOfono())
         return 0;

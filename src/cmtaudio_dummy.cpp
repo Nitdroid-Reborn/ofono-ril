@@ -20,10 +20,16 @@
 
 #include "cmtaudio.h"
 
-void setMute(int mute)
+/* Interface for RIL (defined in cmtaudio.h) */
+
+void cmtAudioInit()
 {
 }
 
-void setActive(int active)
+void cmtAudioSetMute(int mute)
+{
+}
+
+void cmtAudioSetActive(int active)
 {
 }

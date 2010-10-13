@@ -25,9 +25,11 @@
 extern "C" {
 #endif
 
-void setMute(int mute);
+void cmtAudioInit();
 
-void setActive(int active);
+void cmtAudioSetMute(int mute);
+
+void cmtAudioSetActive(int active);
 
 #ifdef __cplusplus
 }

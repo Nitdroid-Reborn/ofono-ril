@@ -143,6 +143,7 @@ static const char gprsIfName[] = "gprs0";
 static const char *responseDataCall[3] = { "1", gprsIfName, ipDataCall };
 static RIL_Token dataCallToken, poweredToken, imeiToken;
 static gboolean pdcActive = FALSE;
+static gboolean roamingAllowed = FALSE;
 
 #ifdef RIL_SHLIB
 static const struct RIL_Env *s_rilenv;
@@ -999,6 +1000,46 @@ static void  requestSendUSSD(void *data, size_t datalen, RIL_Token t)
     }
 }
 
+static void requestGetRoamingPreference(void * data, size_t datalen, RIL_Token t)
+{
+    int response;
+    if (roamingAllowed)
+	response = 2;
+    else
+        response = 0;
+	
+    RIL_onRequestComplete(t, RIL_E_SUCCESS, &response, sizeof(int));
+}	
+
+static void requestSetRoamingPreference(void * data, size_t datalen, RIL_Token t)
+{
+    int requested = *((int *)data);
+    gboolean roaming;
+    GError * error = NULL;
+
+    if (!connman) {
+        LOGE("Connman proxy object doesn't exist");
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+	return;
+    }
+
+    if(requested == 0 || requested == 1)
+	    roaming = FALSE;
+    else
+	    roaming = TRUE;
+
+    GValue value = G_VALUE_INITIALIZATOR;
+    g_value_init(&value, G_TYPE_BOOLEAN);
+    g_value_set_boolean(&value, roaming);
+
+    if(objSetProperty(connman, "RoamingAllowed", &value)){
+        RIL_onRequestComplete(t,RIL_E_GENERIC_FAILURE, NULL, 0);
+	return;
+    }
+
+    RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+
+}	
 
 /*** Callback methods from the RIL library to us ***/
 
@@ -1278,6 +1319,13 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
         case RIL_REQUEST_CHANGE_SIM_PIN2:
             requestEnterSimPin(data, datalen, t);
             break;
+	case RIL_REQUEST_CDMA_QUERY_ROAMING_PREFERENCE:
+	    requestGetRoamingPreference(data, datalen, t);
+	    break;
+
+	case RIL_REQUEST_CDMA_SET_ROAMING_PREFERENCE:
+	    requestSetRoamingPreference(data, datalen, t);
+	    break;
 
         default:
             RIL_onRequestComplete(t, RIL_E_REQUEST_NOT_SUPPORTED, NULL, 0);
@@ -1722,6 +1770,8 @@ static void connman_property_changed(DBusGProxy *proxy, const gchar *property,
     if (!g_strcmp0(property, "Attached")) {
         connmanAttached = g_value_get_boolean(value);
         sendNetworkStateChanged();
+    } else if (!g_strcmp0(property, "RoamingAllowed")) {
+	roamingAllowed = g_value_get_boolean(value);
     }
     g_value_unset(value);
 }

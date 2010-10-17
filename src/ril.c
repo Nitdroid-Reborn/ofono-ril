@@ -105,6 +105,7 @@ static const gchar OFONO_IFACE_SMSMAN[] = "org.ofono.MessageManager";
 static const gchar OFONO_IFACE_CONNMAN[] = "org.ofono.ConnectionManager";
 static const gchar OFONO_IFACE_PDC[] = "org.ofono.ConnectionContext";
 static const gchar OFONO_IFACE_SUPSRV[] = "org.ofono.SupplementaryServices";
+static const gchar OFONO_IFACE_RADIOSETTINGS[] = "org.ofono.RadioSettings";
 static const gchar OFONO_IFACE_AUDIOSETTINGS[] = "org.ofono.AudioSettings";
 static const gchar OFONO_SIGNAL_PROPERTY_CHANGED[] = "PropertyChanged";
 static const gchar OFONO_SIGNAL_DISCONNECT_REASON[] = "DisconnectReason";
@@ -118,7 +119,7 @@ static GSList *voiceCalls;
 static GMainLoop *loop;
 static DBusGConnection *connection;
 static GType type_a_oa_sv, type_oa_sv, type_a_sv;
-static DBusGProxy *manager, *modem, *vcm, *sim, *netreg;
+static DBusGProxy *manager, *modem, *vcm, *sim, *netreg, *radiosettings;
 static DBusGProxy *sms, *connman, *pdc, *supsrv, *audioSettings;
 static int goingOnline = 0;
 static gboolean screenState = TRUE;
@@ -353,6 +354,83 @@ static void requestRegisterNetwork(
     RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 
 }
+
+
+static void requestGetPreferredNetworkType(
+		void * data, size_t datalen, RIL_Token t){
+    const gchar * preferred;
+    int response;
+    GError * error = NULL;
+
+    if (!radiosettings) {
+        LOGE("Radiosettings proxy doesn't exist");
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+	return;
+    }
+
+    GHashTable *dictProps = iface_get_properties(radiosettings);
+    if (!dictProps) {
+        LOGD("!dictProps");
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+	return;
+    }
+
+    GValue *valueSettings = (GValue*) g_hash_table_lookup(dictProps, "TechnologyPreference");
+    if (!valueSettings) {
+        LOGE("!valueSettings");
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+	return;
+    }
+    LOGD("valueSettings-ok");
+    preferred = g_value_peek_pointer(valueSettings);
+
+    if (!g_strcmp0(preferred, "any")) {
+	    /* We don't have support for cdma/evdo so it's gsm/wcdma in auto mode */
+	    response = 3;
+    } else if (!g_strcmp0(preferred, "gsm")){
+	    response = 1; 
+    } else if (!g_strcmp0(preferred, "umts")){
+	    response = 2; 
+    } else if (!g_strcmp0(preferred, "lte")){
+	    /* RIL doesn't have an option for LTE yet */
+	    RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+    }
+    RIL_onRequestComplete(t, RIL_E_SUCCESS, &response, sizeof(int));
+}
+
+static void requestSetPreferredNetworkType(
+		void * data, size_t datalen, RIL_Token t){
+
+    int requested = *((int *)data);
+    const gchar * preferred;
+    GError * error = NULL;
+
+    if (!radiosettings) {
+        LOGE("Radiosettings proxy object doesn't exist");
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+	return;
+    }
+
+    if (requested == 3 || requested == 0){
+	    preferred = g_strdup("any");
+    } else if (requested == 1){
+	    preferred = g_strdup("gsm");
+    } else if (requested == 2){
+	    preferred = g_strdup("umts");
+    } else {
+	    RIL_onRequestComplete(t, RIL_E_MODE_NOT_SUPPORTED, NULL, 0);
+	    return;
+    }
+
+    GValue value = G_VALUE_INITIALIZATOR;
+    g_value_init(&value, G_TYPE_STRING);
+    g_value_set_static_string(&value, preferred);
+    /* For some reason this works but sends back an error, just ignore it*/
+    objSetProperty(radiosettings, "TechnologyPreference", &value);
+
+    RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+}
+
 
 static void sendCallStateChanged(void *param)
 {
@@ -1152,6 +1230,13 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 	case RIL_REQUEST_QUERY_AVAILABLE_NETWORKS:
 	    requestQueryAvailableNetworks(data, datalen, t);
 	    break;
+	
+	case RIL_REQUEST_GET_PREFERRED_NETWORK_TYPE:
+	    requestGetPreferredNetworkType(data, datalen, t);
+	    break;
+	case RIL_REQUEST_SET_PREFERRED_NETWORK_TYPE:
+	    requestSetPreferredNetworkType(data, datalen, t);
+	    break;
 
         case RIL_REQUEST_OEM_HOOK_RAW:
             // echo back data
@@ -1711,6 +1796,12 @@ static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
     g_value_unset(value);
 }
 
+static void radiosettingsPropertyChanged(DBusGProxy *proxy, const gchar *property,
+                                  GValue *value, gpointer user_data)
+{
+	LOGD("RadioSettings property changed %s",property);	
+}
+
 static void initVoiceCallInterfaces()
 {
     vcm = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_CALLMAN);
@@ -1912,6 +2003,19 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                     dbus_g_proxy_connect_signal(netreg,
                                                 OFONO_SIGNAL_PROPERTY_CHANGED,
                                                 G_CALLBACK(netregPropertyChanged), netreg, NULL);
+                    LOGW("NetReg proxy created");
+                }
+                else
+                    LOGE("Failed to create NetReg proxy object");
+            }
+            else if (!radiosettings && !g_strcmp0(*ifArr, OFONO_IFACE_RADIOSETTINGS)) {
+		radiosettings = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_RADIOSETTINGS);
+                if (radiosettings) {
+                    dbus_g_proxy_add_signal(radiosettings, OFONO_SIGNAL_PROPERTY_CHANGED,
+                                            G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
+                    dbus_g_proxy_connect_signal(radiosettings,
+                                                OFONO_SIGNAL_PROPERTY_CHANGED,
+                                                G_CALLBACK(radiosettingsPropertyChanged), radiosettings, NULL);
                     LOGW("NetReg proxy created");
                 }
                 else

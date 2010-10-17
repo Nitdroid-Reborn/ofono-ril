@@ -128,7 +128,7 @@ static char simIMSI[16], modemIMEI[16], modemRev[50];
 static SIM_Status simStatus = SIM_NOT_READY;
 
 /* Network Registratior */
-static int netregStatus = 0; // Not registered
+static int netregStatus = 0, netregTech = 0; // Not registered, Unknown tech
 static unsigned int netregLAC, netregCID, netregStrength;
 
 static char netregOperator[32]; // big enought?
@@ -665,7 +665,7 @@ static void requestGPRSRegistrationState(void *data, size_t datalen, RIL_Token t
             asprintf(&responseStr[0], "%d", connmanAttached ? 1 : 0);
             asprintf(&responseStr[1], "%x", netregLAC);
             asprintf(&responseStr[2], "%x", netregCID);
-            asprintf(&responseStr[3], "%d", connmanAttached ? 2 : 1); // Technology ? EDGE : unknown
+            asprintf(&responseStr[3], "%d", netregTech);
             LOGD("requestGPRSRegistrationState success");
             RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, sizeof(responseStr));
             break;
@@ -683,7 +683,7 @@ static void requestRegistrationState(void *data, size_t datalen, RIL_Token t)
         asprintf(&responseStr[0], "%d", netregStatus);
         asprintf(&responseStr[1], "%x", netregLAC);
         asprintf(&responseStr[2], "%x", netregCID);
-        asprintf(&responseStr[3], "%d", connmanAttached ? 2 : 1); // Technology: EDGE
+        asprintf(&responseStr[3], "%d", netregTech);
         LOGD("requestRegistrationState success");
         RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, sizeof(responseStr));
         for (unsigned i = 0; i < sizeof(responseStr)/sizeof(char*); i++)
@@ -1852,6 +1852,21 @@ static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
     else if (!g_strcmp0(property, "MobileCountryCode")) {
         snprintf(netregMCC, sizeof(netregMCC), "%s",
                  (const char*) g_value_peek_pointer(value));
+    }
+    else if (!g_strcmp0(property, "Technology")) {
+        const gchar *tech = g_value_peek_pointer(value);
+	if (!g_strcmp0(tech, "gsm")){
+		netregTech = 1;
+        }else if (!g_strcmp0(tech, "edge")){
+		netregTech = 2;
+        }else if (!g_strcmp0(tech, "umts")){
+		netregTech = 3;
+        }else if (!g_strcmp0(tech, "hspa")){
+		netregTech = 11;
+        }else if (!g_strcmp0(tech, "lte")){
+		/* RIL doesn't support LTE, report unknown */
+		netregTech = 11;
+	}
     }
 
     gchar *valStr = g_strdup_value_contents(value);

@@ -124,7 +124,7 @@ static DBusGProxy *sms, *connman, *pdc, *supsrv, *audioSettings;
 static int goingOnline = 0;
 static gboolean screenState = TRUE;
 static int lastCallFailCause;
-static char simIMSI[16], modemIMEI[16];
+static char simIMSI[16], modemIMEI[16], modemRev[50];
 static SIM_Status simStatus = SIM_NOT_READY;
 
 /* Network Registratior */
@@ -141,7 +141,7 @@ static char ipDataCall[16];
 static const char gprsIfName[] = "gprs0";
 // we always use only one context for PDC: primarycontext1
 static const char *responseDataCall[3] = { "1", gprsIfName, ipDataCall };
-static RIL_Token dataCallToken, poweredToken, imeiToken;
+static RIL_Token dataCallToken, poweredToken, imeiToken, modemRevToken;
 static gboolean pdcActive = FALSE;
 static gboolean roamingAllowed = FALSE;
 
@@ -1041,6 +1041,16 @@ static void requestSetRoamingPreference(void * data, size_t datalen, RIL_Token t
 
 }	
 
+static void requestBasebandVersion(void * data, size_t datalen, RIL_Token t)
+{
+    GHashTable* props;
+    GValue* value;
+    if (modemRev[0] == '\0') {
+	/* We don't have the revision, lets save the token and reply when we have the version */
+	modemRevToken = t;
+    } 
+}
+
 /*** Callback methods from the RIL library to us ***/
 
 /**
@@ -1078,7 +1088,8 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
     if (sState == RADIO_STATE_OFF
         && !(request == RIL_REQUEST_RADIO_POWER
              || request == RIL_REQUEST_GET_SIM_STATUS
-             || request == RIL_REQUEST_GET_IMEI)
+             || request == RIL_REQUEST_GET_IMEI
+	     || request == RIL_REQUEST_BASEBAND_VERSION)
         ) {
         RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
         return;
@@ -1229,6 +1240,10 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             else
                 imeiToken = t;
             break;
+
+	case RIL_REQUEST_BASEBAND_VERSION:
+            requestBasebandVersion(data, datalen, t);
+	    break;
 
         case RIL_REQUEST_SIM_IO:
             requestSIM_IO(data,datalen,t);
@@ -2149,6 +2164,11 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                                   modemIMEI, sizeof(char *));
             imeiToken = 0;
         }
+    }
+    else if (g_strcmp0(property, "Revision") == 0) {
+	strncpy(modemRev, g_value_peek_pointer(value), sizeof(modemRev));
+	RIL_onRequestComplete(modemRevToken, RIL_E_SUCCESS, 
+			      modemRev, sizeof(char *));
     }
 
     g_value_unset(value);

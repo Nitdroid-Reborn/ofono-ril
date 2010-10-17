@@ -100,6 +100,7 @@ static const gchar OFONO_IFACE_CALL[] = "org.ofono.VoiceCall";
 static const gchar OFONO_IFACE_CALLMAN[] = "org.ofono.VoiceCallManager";
 static const gchar OFONO_IFACE_SIMMANAGER[] = "org.ofono.SimManager";
 static const gchar OFONO_IFACE_NETREG[] = "org.ofono.NetworkRegistration";
+static const gchar OFONO_IFACE_NETOP[] = "org.ofono.NetworkOperator";
 static const gchar OFONO_IFACE_SMSMAN[] = "org.ofono.MessageManager";
 static const gchar OFONO_IFACE_CONNMAN[] = "org.ofono.ConnectionManager";
 static const gchar OFONO_IFACE_PDC[] = "org.ofono.ConnectionContext";
@@ -260,6 +261,97 @@ static void requestQueryNetworkSelectionMode(
 {
     int response = 0;
     RIL_onRequestComplete(t, RIL_E_SUCCESS, &response, sizeof(int));
+}
+
+static void requestQueryAvailableNetworks(
+		void * data, size_t datalen, RIL_Token t)
+{
+    GError *error = NULL;
+    unsigned int i=0;
+    GHashTable* opParams;
+    DBusGProxy * proxy;
+
+    if (!netreg) {
+        LOGE("Netreg proxy doesn't exist");
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+	return;
+    }
+    LOGD("proxy manager - ok");
+
+    GPtrArray *ops = 0;
+    /* Timeout after 15 minutes because Operator Scan takes looooooong */
+    if (!dbus_g_proxy_call_with_timeout(netreg, "Scan", 15*60000, &error, G_TYPE_INVALID,
+                           type_a_oa_sv, &ops,
+                           G_TYPE_INVALID))
+    {
+        LOGE(".GetOperators failed: %s", error->message);
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+	return;
+    }
+
+    if (!ops || !ops->len) {
+        LOGE("ops->len is empty.");
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+	return;
+    }
+
+    LOGD("Got an operator array : len %d", ops->len);
+    char * response[ops->len*4];
+    for(i=0; i < ops->len; i++){
+	    opParams = (GHashTable *)g_value_get_boxed(g_value_array_get_nth(ops->pdata[i], 1)); 
+	    GValue *name = (GValue *) g_hash_table_lookup(opParams, "Name");
+	    GValue *status = (GValue *) g_hash_table_lookup(opParams, "Status");
+	    GValue *mcc = (GValue *) g_hash_table_lookup(opParams, "MobileCountryCode");
+	    GValue *mnc = (GValue *) g_hash_table_lookup(opParams, "MobileNetworkCode");
+
+	    LOGD("Operator : %s, name %s", 
+			    (char *)g_value_get_boxed(g_value_array_get_nth(ops->pdata[i], 0)), 
+			    (char *)g_value_peek_pointer(name));
+
+	    char * mccmnc = NULL;
+	    asprintf(&mccmnc, "%s%s", 
+			    (char *)g_value_peek_pointer(mcc),
+			    (char *)g_value_peek_pointer(mnc));
+
+	    response[i*4] = strdup(g_value_peek_pointer(name)); 
+	    response[i*4 + 1] = strdup(g_value_peek_pointer(name));
+	    response[i*4 + 2] = mccmnc;
+	    response[i*4 + 3] = strdup(g_value_peek_pointer(status));
+    }
+
+    g_ptr_array_free(ops, TRUE);
+
+    RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
+}
+
+static void requestRegisterNetwork(
+		void * data, size_t datalen, RIL_Token t)
+{
+    char * mccmnc = data;
+    char  objPath[50];
+    GError * error = NULL;
+    DBusGProxy * proxy;
+
+    snprintf(objPath, sizeof(objPath), "%s/operator/%s", MODEM,mccmnc);
+    LOGD("Object path : %s",objPath);
+
+    proxy = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, objPath, OFONO_IFACE_NETOP);
+    if (!proxy) {
+        LOGE("Failed to create Manager proxy object");
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+	return;
+    }
+
+    if (!dbus_g_proxy_call(proxy, "Register", &error, G_TYPE_INVALID,
+                           G_TYPE_INVALID))
+    {
+        LOGE(".Register failed: %s", error->message);
+	RIL_onRequestComplete(t, RIL_E_ILLEGAL_SIM_OR_ME, NULL, 0);
+	return;
+    }
+    
+    RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+
 }
 
 static void sendCallStateChanged(void *param)
@@ -1046,7 +1138,9 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
         case RIL_REQUEST_SET_NETWORK_SELECTION_AUTOMATIC:
             RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
             break;
-
+	case RIL_REQUEST_SET_NETWORK_SELECTION_MANUAL:
+	    requestRegisterNetwork(data, datalen, t);
+	    break;
         case RIL_REQUEST_DATA_CALL_LIST:
             requestDataCallList(&t);
             break;
@@ -1054,6 +1148,10 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
         case RIL_REQUEST_QUERY_NETWORK_SELECTION_MODE:
             requestQueryNetworkSelectionMode(data, datalen, t);
             break;
+
+	case RIL_REQUEST_QUERY_AVAILABLE_NETWORKS:
+	    requestQueryAvailableNetworks(data, datalen, t);
+	    break;
 
         case RIL_REQUEST_OEM_HOOK_RAW:
             // echo back data

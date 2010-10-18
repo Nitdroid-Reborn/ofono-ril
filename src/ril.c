@@ -128,7 +128,7 @@ static char simIMSI[16], modemIMEI[16], modemRev[50];
 static SIM_Status simStatus = SIM_NOT_READY;
 
 /* Network Registratior */
-static int netregStatus = 0, netregTech = 0; // Not registered, Unknown tech
+static int netregStatus = 0, netregTech = 0, netregMode = 0; // Not registered, Unknown tech
 static unsigned int netregLAC, netregCID, netregStrength;
 
 static char netregOperator[32]; // big enought?
@@ -261,8 +261,7 @@ static void requestDataCallList(RIL_Token *t)
 static void requestQueryNetworkSelectionMode(
     void *data, size_t datalen, RIL_Token t)
 {
-    int response = 0;
-    RIL_onRequestComplete(t, RIL_E_SUCCESS, &response, sizeof(int));
+    RIL_onRequestComplete(t, RIL_E_SUCCESS, &netregMode, sizeof(int));
 }
 
 static void requestQueryAvailableNetworks(
@@ -1866,6 +1865,14 @@ static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
         }else if (!g_strcmp0(tech, "lte")){
 		/* RIL doesn't support LTE, report unknown */
 		netregTech = 11;
+	}
+    }
+    else if (!g_strcmp0(property, "Mode")) {
+        const gchar *mode = g_value_peek_pointer(value);
+	if (!g_strcmp0(mode, "auto")){
+		netregMode = 0;
+        }else if (!g_strcmp0(mode, "manual")){
+		netregMode = 1;
 	}
     }
 

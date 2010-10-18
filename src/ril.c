@@ -171,9 +171,9 @@ static void setRadioState(RIL_RadioState newState);
 
 static void hash_entry_gvalue_print(const gchar *key, GValue *val, gpointer userdata)
 {
-	char *str = g_strdup_value_contents(val);
-	LOGD("[\"%s\"] = %s", key, str);
-	free(str);
+    char *str = g_strdup_value_contents(val);
+    LOGD("[\"%s\"] = %s", key, str);
+    free(str);
 }
 
 static RIL_CallState ofonoStateToRILState(const gchar *state)
@@ -265,7 +265,7 @@ static void requestQueryNetworkSelectionMode(
 }
 
 static void requestQueryAvailableNetworks(
-		void * data, size_t datalen, RIL_Token t)
+    void * data, size_t datalen, RIL_Token t)
 {
     GError *error = NULL;
     unsigned int i=0;
@@ -274,50 +274,50 @@ static void requestQueryAvailableNetworks(
 
     if (!netreg) {
         LOGE("Netreg proxy doesn't exist");
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-	return;
+        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+        return;
     }
     LOGD("proxy manager - ok");
 
     GPtrArray *ops = 0;
     /* Timeout after 15 minutes because Operator Scan takes looooooong */
     if (!dbus_g_proxy_call_with_timeout(netreg, "Scan", 15*60000, &error, G_TYPE_INVALID,
-                           type_a_oa_sv, &ops,
-                           G_TYPE_INVALID))
+                                        type_a_oa_sv, &ops,
+                                        G_TYPE_INVALID))
     {
         LOGE(".GetOperators failed: %s", error->message);
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-	return;
+        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+        return;
     }
 
     if (!ops || !ops->len) {
         LOGE("ops->len is empty.");
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-	return;
+        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+        return;
     }
 
     LOGD("Got an operator array : len %d", ops->len);
     char * response[ops->len*4];
     for(i=0; i < ops->len; i++){
-	    opParams = (GHashTable *)g_value_get_boxed(g_value_array_get_nth(ops->pdata[i], 1)); 
-	    GValue *name = (GValue *) g_hash_table_lookup(opParams, "Name");
-	    GValue *status = (GValue *) g_hash_table_lookup(opParams, "Status");
-	    GValue *mcc = (GValue *) g_hash_table_lookup(opParams, "MobileCountryCode");
-	    GValue *mnc = (GValue *) g_hash_table_lookup(opParams, "MobileNetworkCode");
+        opParams = (GHashTable *)g_value_get_boxed(g_value_array_get_nth(ops->pdata[i], 1)); 
+        GValue *name = (GValue *) g_hash_table_lookup(opParams, "Name");
+        GValue *status = (GValue *) g_hash_table_lookup(opParams, "Status");
+        GValue *mcc = (GValue *) g_hash_table_lookup(opParams, "MobileCountryCode");
+        GValue *mnc = (GValue *) g_hash_table_lookup(opParams, "MobileNetworkCode");
 
-	    LOGD("Operator : %s, name %s", 
-			    (char *)g_value_get_boxed(g_value_array_get_nth(ops->pdata[i], 0)), 
-			    (char *)g_value_peek_pointer(name));
+        LOGD("Operator : %s, name %s", 
+             (char *)g_value_get_boxed(g_value_array_get_nth(ops->pdata[i], 0)), 
+             (char *)g_value_peek_pointer(name));
 
-	    char * mccmnc = NULL;
-	    asprintf(&mccmnc, "%s%s", 
-			    (char *)g_value_peek_pointer(mcc),
-			    (char *)g_value_peek_pointer(mnc));
+        char * mccmnc = NULL;
+        asprintf(&mccmnc, "%s%s", 
+                 (char *)g_value_peek_pointer(mcc),
+                 (char *)g_value_peek_pointer(mnc));
 
-	    response[i*4] = strdup(g_value_peek_pointer(name)); 
-	    response[i*4 + 1] = strdup(g_value_peek_pointer(name));
-	    response[i*4 + 2] = mccmnc;
-	    response[i*4 + 3] = strdup(g_value_peek_pointer(status));
+        response[i*4] = strdup(g_value_peek_pointer(name)); 
+        response[i*4 + 1] = strdup(g_value_peek_pointer(name));
+        response[i*4 + 2] = mccmnc;
+        response[i*4 + 3] = strdup(g_value_peek_pointer(status));
     }
 
     g_ptr_array_free(ops, TRUE);
@@ -326,7 +326,7 @@ static void requestQueryAvailableNetworks(
 }
 
 static void requestRegisterNetwork(
-		void * data, size_t datalen, RIL_Token t)
+    void * data, size_t datalen, RIL_Token t)
 {
     char * mccmnc = data;
     char  objPath[50];
@@ -339,16 +339,16 @@ static void requestRegisterNetwork(
     proxy = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, objPath, OFONO_IFACE_NETOP);
     if (!proxy) {
         LOGE("Failed to create Manager proxy object");
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-	return;
+        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+        return;
     }
 
     if (!dbus_g_proxy_call(proxy, "Register", &error, G_TYPE_INVALID,
                            G_TYPE_INVALID))
     {
         LOGE(".Register failed: %s", error->message);
-	RIL_onRequestComplete(t, RIL_E_ILLEGAL_SIM_OR_ME, NULL, 0);
-	return;
+        RIL_onRequestComplete(t, RIL_E_ILLEGAL_SIM_OR_ME, NULL, 0);
+        return;
     }
     
     RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
@@ -357,49 +357,49 @@ static void requestRegisterNetwork(
 
 
 static void requestGetPreferredNetworkType(
-		void * data, size_t datalen, RIL_Token t){
+    void * data, size_t datalen, RIL_Token t){
     const gchar * preferred;
     int response;
     GError * error = NULL;
 
     if (!radiosettings) {
         LOGE("Radiosettings proxy doesn't exist");
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-	return;
+        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+        return;
     }
 
     GHashTable *dictProps = iface_get_properties(radiosettings);
     if (!dictProps) {
         LOGD("!dictProps");
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-	return;
+        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+        return;
     }
 
     GValue *valueSettings = (GValue*) g_hash_table_lookup(dictProps, "TechnologyPreference");
     if (!valueSettings) {
         LOGE("!valueSettings");
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-	return;
+        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+        return;
     }
     LOGD("valueSettings-ok");
     preferred = g_value_peek_pointer(valueSettings);
 
     if (!g_strcmp0(preferred, "any")) {
-	    /* We don't have support for cdma/evdo so it's gsm/wcdma in auto mode */
-	    response = 3;
+        /* We don't have support for cdma/evdo so it's gsm/wcdma in auto mode */
+        response = 3;
     } else if (!g_strcmp0(preferred, "gsm")){
-	    response = 1; 
+        response = 1; 
     } else if (!g_strcmp0(preferred, "umts")){
-	    response = 2; 
+        response = 2; 
     } else if (!g_strcmp0(preferred, "lte")){
-	    /* RIL doesn't have an option for LTE yet */
-	    RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+        /* RIL doesn't have an option for LTE yet */
+        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
     }
     RIL_onRequestComplete(t, RIL_E_SUCCESS, &response, sizeof(int));
 }
 
 static void requestSetPreferredNetworkType(
-		void * data, size_t datalen, RIL_Token t){
+    void * data, size_t datalen, RIL_Token t){
 
     int requested = *((int *)data);
     const gchar * preferred;
@@ -407,19 +407,19 @@ static void requestSetPreferredNetworkType(
 
     if (!radiosettings) {
         LOGE("Radiosettings proxy object doesn't exist");
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-	return;
+        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+        return;
     }
 
     if (requested == 3 || requested == 0){
-	    preferred = g_strdup("any");
+        preferred = g_strdup("any");
     } else if (requested == 1){
-	    preferred = g_strdup("gsm");
+        preferred = g_strdup("gsm");
     } else if (requested == 2){
-	    preferred = g_strdup("umts");
+        preferred = g_strdup("umts");
     } else {
-	    RIL_onRequestComplete(t, RIL_E_MODE_NOT_SUPPORTED, NULL, 0);
-	    return;
+        RIL_onRequestComplete(t, RIL_E_MODE_NOT_SUPPORTED, NULL, 0);
+        return;
     }
 
     GValue value = G_VALUE_INITIALIZATOR;
@@ -642,7 +642,7 @@ static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 
     int strength = (netregStrength*31)/100;
     if (strength == 0)
-      strength = 99;
+        strength = 99;
 
     st.GW_SignalStrength.signalStrength = strength;
     st.GW_SignalStrength.bitErrorRate = 0;
@@ -1003,12 +1003,12 @@ static void requestGetRoamingPreference(void * data, size_t datalen, RIL_Token t
 {
     int response;
     if (roamingAllowed)
-	response = 2;
+        response = 2;
     else
         response = 0;
-	
+
     RIL_onRequestComplete(t, RIL_E_SUCCESS, &response, sizeof(int));
-}	
+}
 
 static void requestSetRoamingPreference(void * data, size_t datalen, RIL_Token t)
 {
@@ -1018,14 +1018,14 @@ static void requestSetRoamingPreference(void * data, size_t datalen, RIL_Token t
 
     if (!connman) {
         LOGE("Connman proxy object doesn't exist");
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-	return;
+        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+        return;
     }
 
     if(requested == 0 || requested == 1)
-	    roaming = FALSE;
+        roaming = FALSE;
     else
-	    roaming = TRUE;
+        roaming = TRUE;
 
     GValue value = G_VALUE_INITIALIZATOR;
     g_value_init(&value, G_TYPE_BOOLEAN);
@@ -1033,20 +1033,20 @@ static void requestSetRoamingPreference(void * data, size_t datalen, RIL_Token t
 
     if(objSetProperty(connman, "RoamingAllowed", &value)){
         RIL_onRequestComplete(t,RIL_E_GENERIC_FAILURE, NULL, 0);
-	return;
+        return;
     }
 
     RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 
-}	
+}
 
 static void requestBasebandVersion(void * data, size_t datalen, RIL_Token t)
 {
     GHashTable* props;
     GValue* value;
     if (modemRev[0] == '\0') {
-	/* We don't have the revision, lets save the token and reply when we have the version */
-	modemRevToken = t;
+        /* We don't have the revision, lets save the token and reply when we have the version */
+        modemRevToken = t;
     } 
 }
 
@@ -1088,7 +1088,7 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
         && !(request == RIL_REQUEST_RADIO_POWER
              || request == RIL_REQUEST_GET_SIM_STATUS
              || request == RIL_REQUEST_GET_IMEI
-	     || request == RIL_REQUEST_BASEBAND_VERSION)
+             || request == RIL_REQUEST_BASEBAND_VERSION)
         ) {
         RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
         return;
@@ -1240,9 +1240,9 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
                 imeiToken = t;
             break;
 
-	case RIL_REQUEST_BASEBAND_VERSION:
+        case RIL_REQUEST_BASEBAND_VERSION:
             requestBasebandVersion(data, datalen, t);
-	    break;
+            break;
 
         case RIL_REQUEST_SIM_IO:
             requestSIM_IO(data,datalen,t);
@@ -1271,9 +1271,9 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
         case RIL_REQUEST_SET_NETWORK_SELECTION_AUTOMATIC:
             RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
             break;
-	case RIL_REQUEST_SET_NETWORK_SELECTION_MANUAL:
-	    requestRegisterNetwork(data, datalen, t);
-	    break;
+        case RIL_REQUEST_SET_NETWORK_SELECTION_MANUAL:
+            requestRegisterNetwork(data, datalen, t);
+            break;
         case RIL_REQUEST_DATA_CALL_LIST:
             requestDataCallList(&t);
             break;
@@ -1282,16 +1282,16 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             requestQueryNetworkSelectionMode(data, datalen, t);
             break;
 
-	case RIL_REQUEST_QUERY_AVAILABLE_NETWORKS:
-	    requestQueryAvailableNetworks(data, datalen, t);
-	    break;
-	
-	case RIL_REQUEST_GET_PREFERRED_NETWORK_TYPE:
-	    requestGetPreferredNetworkType(data, datalen, t);
-	    break;
-	case RIL_REQUEST_SET_PREFERRED_NETWORK_TYPE:
-	    requestSetPreferredNetworkType(data, datalen, t);
-	    break;
+        case RIL_REQUEST_QUERY_AVAILABLE_NETWORKS:
+            requestQueryAvailableNetworks(data, datalen, t);
+            break;
+
+        case RIL_REQUEST_GET_PREFERRED_NETWORK_TYPE:
+            requestGetPreferredNetworkType(data, datalen, t);
+            break;
+        case RIL_REQUEST_SET_PREFERRED_NETWORK_TYPE:
+            requestSetPreferredNetworkType(data, datalen, t);
+            break;
 
         case RIL_REQUEST_OEM_HOOK_RAW:
             // echo back data
@@ -1333,13 +1333,13 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
         case RIL_REQUEST_CHANGE_SIM_PIN2:
             requestEnterSimPin(data, datalen, t);
             break;
-	case RIL_REQUEST_CDMA_QUERY_ROAMING_PREFERENCE:
-	    requestGetRoamingPreference(data, datalen, t);
-	    break;
+        case RIL_REQUEST_CDMA_QUERY_ROAMING_PREFERENCE:
+            requestGetRoamingPreference(data, datalen, t);
+            break;
 
-	case RIL_REQUEST_CDMA_SET_ROAMING_PREFERENCE:
-	    requestSetRoamingPreference(data, datalen, t);
-	    break;
+        case RIL_REQUEST_CDMA_SET_ROAMING_PREFERENCE:
+            requestSetRoamingPreference(data, datalen, t);
+            break;
 
         default:
             RIL_onRequestComplete(t, RIL_E_REQUEST_NOT_SUPPORTED, NULL, 0);
@@ -1586,7 +1586,7 @@ static void callDisconnectReason(DBusGProxy *proxy, const gchar *reason,
 }
 
 static void vcmPropertyChanged(DBusGProxy *proxy, const gchar *property,
-                                 GValue *value, gpointer user_data)
+                               GValue *value, gpointer user_data)
 {
     // XXX
     LOGW("vcm_property_changed %s->%s", property, g_strdup_value_contents(value));
@@ -1785,7 +1785,7 @@ static void connman_property_changed(DBusGProxy *proxy, const gchar *property,
         connmanAttached = g_value_get_boolean(value);
         sendNetworkStateChanged();
     } else if (!g_strcmp0(property, "RoamingAllowed")) {
-	roamingAllowed = g_value_get_boolean(value);
+        roamingAllowed = g_value_get_boolean(value);
     }
     g_value_unset(value);
 }
@@ -1808,13 +1808,13 @@ static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
                                   GValue *value, gpointer user_data)
 {
     if (!g_strcmp0(property, "Strength")) {
-      //LOGD("Strength: %u, screenState=%d", g_value_get_uint(value), screenState);
-      if (screenState) {
-        netregStrength = g_value_get_uint(value);
-        requestSignalStrength(0, 0, 0);
-      }
-      g_value_unset(value);
-      return;
+        //LOGD("Strength: %u, screenState=%d", g_value_get_uint(value), screenState);
+        if (screenState) {
+            netregStrength = g_value_get_uint(value);
+            requestSignalStrength(0, 0, 0);
+        }
+        g_value_unset(value);
+        return;
     }
     else if (!g_strcmp0(property, "CellId")) {
         netregCID = g_value_get_uint(value);
@@ -1854,26 +1854,26 @@ static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
     }
     else if (!g_strcmp0(property, "Technology")) {
         const gchar *tech = g_value_peek_pointer(value);
-	if (!g_strcmp0(tech, "gsm")){
-		netregTech = 1;
+        if (!g_strcmp0(tech, "gsm")){
+            netregTech = 1;
         }else if (!g_strcmp0(tech, "edge")){
-		netregTech = 2;
+            netregTech = 2;
         }else if (!g_strcmp0(tech, "umts")){
-		netregTech = 3;
+            netregTech = 3;
         }else if (!g_strcmp0(tech, "hspa")){
-		netregTech = 11;
+            netregTech = 11;
         }else if (!g_strcmp0(tech, "lte")){
-		/* RIL doesn't support LTE, report unknown */
-		netregTech = 11;
-	}
+            /* RIL doesn't support LTE, report unknown */
+            netregTech = 11;
+        }
     }
     else if (!g_strcmp0(property, "Mode")) {
         const gchar *mode = g_value_peek_pointer(value);
-	if (!g_strcmp0(mode, "auto")){
-		netregMode = 0;
+        if (!g_strcmp0(mode, "auto")){
+            netregMode = 0;
         }else if (!g_strcmp0(mode, "manual")){
-		netregMode = 1;
-	}
+            netregMode = 1;
+        }
     }
 
     gchar *valStr = g_strdup_value_contents(value);
@@ -1884,9 +1884,9 @@ static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
 }
 
 static void radiosettingsPropertyChanged(DBusGProxy *proxy, const gchar *property,
-                                  GValue *value, gpointer user_data)
+                                         GValue *value, gpointer user_data)
 {
-	LOGD("RadioSettings property changed %s",property);	
+    LOGD("RadioSettings property changed %s",property); 
 }
 
 static void initVoiceCallInterfaces()
@@ -2096,7 +2096,7 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                     LOGE("Failed to create NetReg proxy object");
             }
             else if (!radiosettings && !g_strcmp0(*ifArr, OFONO_IFACE_RADIOSETTINGS)) {
-		radiosettings = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_RADIOSETTINGS);
+                radiosettings = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_RADIOSETTINGS);
                 if (radiosettings) {
                     dbus_g_proxy_add_signal(radiosettings, OFONO_SIGNAL_PROPERTY_CHANGED,
                                             G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
@@ -2188,9 +2188,9 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
         }
     }
     else if (g_strcmp0(property, "Revision") == 0) {
-	strncpy(modemRev, g_value_peek_pointer(value), sizeof(modemRev));
-	RIL_onRequestComplete(modemRevToken, RIL_E_SUCCESS, 
-			      modemRev, sizeof(char *));
+        strncpy(modemRev, g_value_peek_pointer(value), sizeof(modemRev));
+        RIL_onRequestComplete(modemRevToken, RIL_E_SUCCESS, 
+                              modemRev, sizeof(char *));
     }
 
     g_value_unset(value);
@@ -2268,7 +2268,7 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
     s_rilenv = env;
 
     if (!g_thread_supported ())
-	{
+    {
         g_thread_init(NULL);
         dbus_g_thread_init();
     }
@@ -2278,9 +2278,9 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
     type_a_sv = dbus_g_type_get_map("GHashTable", G_TYPE_STRING, G_TYPE_VALUE);
 
     type_oa_sv = dbus_g_type_get_struct("GValueArray",
-                                     DBUS_TYPE_G_OBJECT_PATH,
-                                     type_a_sv,
-                                     G_TYPE_INVALID);
+                                        DBUS_TYPE_G_OBJECT_PATH,
+                                        type_a_sv,
+                                        G_TYPE_INVALID);
 
     type_a_oa_sv = dbus_g_type_get_collection("GPtrArray", type_oa_sv);
 

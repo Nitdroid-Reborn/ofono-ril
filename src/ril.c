@@ -1377,7 +1377,7 @@ static void onCancel (RIL_Token t)
 
 static const char * getVersion(void)
 {
-    return "NitDroid ofono-ril 0.0.6";
+    return "NitDroid ofono-ril 0.0.7";
 }
 
 void

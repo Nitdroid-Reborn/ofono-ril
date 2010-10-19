@@ -145,13 +145,11 @@ static RIL_Token dataCallToken, poweredToken, imeiToken, modemRevToken;
 static gboolean pdcActive = FALSE;
 static gboolean roamingAllowed = FALSE;
 
-#ifdef RIL_SHLIB
 static const struct RIL_Env *s_rilenv;
 
 #define RIL_onRequestComplete(t, e, response, responselen) s_rilenv->OnRequestComplete(t,e, response, responselen)
 #define RIL_onUnsolicitedResponse(a,b,c) s_rilenv->OnUnsolicitedResponse(a,b,c)
 #define RIL_requestTimedCallback(a,b,c) s_rilenv->RequestTimedCallback(a,b,c)
-#endif
 
 static RIL_RadioState sState = RADIO_STATE_UNAVAILABLE;
 
@@ -2256,14 +2254,11 @@ static int initOfono()
     return 0;
 }
 
-#ifdef RIL_SHLIB
-
-pthread_t s_tid_mainloop;
-
 const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **argv)
 {
     int ret;
     pthread_attr_t attr;
+    pthread_t s_tid_mainloop;
 
     s_rilenv = env;
 
@@ -2309,51 +2304,5 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     ret = pthread_create(&s_tid_mainloop, &attr, mainLoop, NULL);
 
-    sleep(2);
-
     return &s_callbacks;
 }
-#else /* RIL_SHLIB */
-int main (int argc, char **argv)
-{
-    int ret;
-    int opt;
-
-    while ( -1 != (opt = getopt(argc, argv, "p:d:"))) {
-        switch (opt) {
-            case 'p':
-                s_port = atoi(optarg);
-                if (s_port == 0) {
-                    usage(argv[0]);
-                }
-                LOGI("Opening loopback port %d\n", s_port);
-                break;
-
-            case 'd':
-                s_device_path = optarg;
-                LOGI("Opening tty device %s\n", s_device_path);
-                break;
-
-            case 's':
-                s_device_path   = optarg;
-                s_device_socket = 1;
-                LOGI("Opening socket %s\n", s_device_path);
-                break;
-
-            default:
-                usage(argv[0]);
-        }
-    }
-
-    if (s_port < 0 && s_device_path == NULL) {
-        usage(argv[0]);
-    }
-
-    RIL_register(&s_callbacks);
-
-    mainLoop(NULL);
-
-    return 0;
-}
-
-#endif /* RIL_SHLIB */

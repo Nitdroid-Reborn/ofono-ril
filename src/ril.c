@@ -240,6 +240,14 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
         setRadioState(RADIO_STATE_OFF);
         RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
     } else if (onOff > 0 /*&& sState == RADIO_STATE_OFF*/) {
+
+        // dirty hack to exit from airplane mode
+        // relies on init.<device>.rc ability restart ofono
+        // after rild process was crashed
+        static int wasPowered = 0;
+        if (wasPowered++)
+            exit(0);
+
         g_value_set_boolean(&value, TRUE);
         objSetProperty(modem, "Powered", &value);
         poweredToken = t;

@@ -32,7 +32,20 @@ extern "C" {
 #define vsyslog(level, format, ap) LOG_PRI_VA(level, LOG_TAG, format, ap);
 #include <utils/Log.h>
 
+#include <AudioSystem.h>
+#include <AudioTrack.h>
+
+#define LOOPBACK_TEST 1
+
 namespace {
+
+const int streamType = android::AudioSystem::VOICE_CALL;
+const uint32_t sampleRate = 8000;
+
+pthread_mutex_t trackMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t trackCond = PTHREAD_COND_INITIALIZER;
+android::AudioTrack *aTrack;
+
 
 cmtspeech_t *cmtspeech;
 
@@ -64,7 +77,57 @@ static void setScheduler(void)
 
 static void trackCallback(int event, void* user, void *info)
 {
-    //using namespace android;
+    using namespace android;
+
+#if 0
+    pthread_mutex_lock(&trackMutex);
+    {
+        pthread_cond_wait(&trackCond, &trackMutex);
+    }
+    pthread_mutex_unlock(&count_mutex);
+#endif
+}
+
+static void trackStart()
+{
+    using namespace android;
+
+    if (!aTrack) {
+        uint32_t afLatency;
+        int afFrameCount, afSampleRate, minBufCount;
+        AudioSystem::getOutputLatency(&afLatency, streamType);
+        AudioSystem::getOutputFrameCount(&afFrameCount, streamType);
+        AudioSystem::getOutputSamplingRate(&afSampleRate, streamType);
+        minBufCount = afLatency / ((1000 * afFrameCount)/afSampleRate);
+        if (minBufCount < 2) minBufCount = 2;
+        int minFrameCount = (afFrameCount*sampleRate*minBufCount)/afSampleRate;
+        LOGD("afLatency=%u, afFrameCount=%d, afSampleRate=%d, minBufCount=%d, minFrameCount=%d",
+             afLatency, afFrameCount, afSampleRate, minBufCount, minFrameCount);
+
+        aTrack = new AudioTrack(streamType, sampleRate, AudioSystem::PCM_16_BIT,
+                                AudioTrack::MONO, minFrameCount, 0, trackCallback);
+
+        if (aTrack->initCheck() != NO_ERROR) {
+            LOGE("aTrack->initCheck() failed");
+            return;
+        }
+
+        aTrack->setVolume(0.5f, 0);
+        aTrack->setSampleRate(sampleRate/2);
+        LOGD("AudioTrack ready");
+    }
+
+    aTrack->start();
+}
+
+static void trackStop()
+{
+    if (aTrack) {
+        aTrack->flush();
+        aTrack->stop();
+        delete aTrack;
+        aTrack = NULL;
+    }
 }
 
 /*****************************************************************************/
@@ -78,6 +141,7 @@ static void handleCmtspeechData()
     int res = cmtspeech_dl_buffer_acquire(cmtspeech, &dlbuf);
     if (res == 0) {
         LOGD("Received a DL packet (%u bytes).\n", dlbuf->count);
+#if LOOPBACK_TEST > 0
         if (cmtspeech_protocol_state(cmtspeech) ==
             CMTSPEECH_STATE_ACTIVE_DLUL) {
             res = cmtspeech_ul_buffer_acquire(cmtspeech, &ulbuf);
@@ -89,6 +153,9 @@ static void handleCmtspeechData()
                 cmtspeech_ul_buffer_release(cmtspeech, ulbuf);
             }
         }
+#else
+        ssize_t written = aTrack->write(dlbuf->payload, dlbuf->pcount);
+#endif
         res = cmtspeech_dl_buffer_release(cmtspeech, dlbuf);
     }
 }
@@ -232,8 +299,14 @@ void cmtAudioSetActive(int active)
         static bool oldState = false;
         bool newState = !!active;
         if (newState != oldState) {
-            cmtspeech_state_change_call_status(cmtspeech, newState);
             oldState = newState;
+#if LOOPBACK_TEST < 1
+            if (newState)
+                trackStart();
+            else
+                trackStop();
+#endif
+            cmtspeech_state_change_call_status(cmtspeech, newState);
         }
         else {
             LOGE("newState==oldState, ignoring state transition");

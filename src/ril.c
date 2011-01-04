@@ -2195,8 +2195,11 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
     }
     else if (g_strcmp0(property, "Revision") == 0) {
         strncpy(modemRev, g_value_peek_pointer(value), sizeof(modemRev));
-        RIL_onRequestComplete(modemRevToken, RIL_E_SUCCESS, 
-                              modemRev, sizeof(char *));
+        if (modemRevToken) {
+            RIL_onRequestComplete(modemRevToken, RIL_E_SUCCESS, 
+                                  modemRev, sizeof(char *));
+            modemRevToken = 0;
+        }
     }
 
     g_value_unset(value);

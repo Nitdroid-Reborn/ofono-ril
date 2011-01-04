@@ -57,9 +57,12 @@ endif
 LOCAL_LDLIBS += -lpthread
 
 ifeq ($(TARGET_PRODUCT),n900)
-LOCAL_C_INCLUDES += external/libcmtspeechdata
+LOCAL_C_INCLUDES += \
+	external/libcmtspeechdata \
+	frameworks/base/include/media
+
 LOCAL_SRC_FILES += cmtaudio_n900.cpp
-LOCAL_SHARED_LIBRARIES += libcmtspeechdata
+LOCAL_SHARED_LIBRARIES += libcmtspeechdata libaudioflinger libmedia
 else
 LOCAL_SRC_FILES += cmtaudio_dummy.cpp
 endif

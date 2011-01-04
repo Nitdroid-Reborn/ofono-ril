@@ -27,5 +27,6 @@ LOCAL_C_INCLUDES:= \
 ##
 
 LOCAL_MODULE:=libdbus_glib
+LOCAL_MODULE_TAGS := optional
 
 include $(BUILD_STATIC_LIBRARY)

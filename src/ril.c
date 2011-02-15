@@ -1816,7 +1816,7 @@ static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
     if (!g_strcmp0(property, "Strength")) {
         //LOGD("Strength: %u, screenState=%d", g_value_get_uint(value), screenState);
         if (screenState) {
-            netregStrength = g_value_get_uint(value);
+            netregStrength = (unsigned int)g_value_get_uchar(value);
             requestSignalStrength(0, 0, 0);
         }
         g_value_unset(value);
@@ -2079,15 +2079,6 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
             else if (!sim && !g_strcmp0(*ifArr, OFONO_IFACE_SIMMANAGER)) {
                 initSimInterface();
             }
-            else if (!goingOnline && !g_strcmp0(*ifArr, "org.ofono.Phonebook")) {
-                LOGW("Phonebook is created, going online");
-                GValue value = G_VALUE_INITIALIZATOR;
-                g_value_init(&value, G_TYPE_BOOLEAN);
-                g_value_set_boolean(&value, TRUE);
-                objSetProperty(modem, "Online", &value);
-                goingOnline = 1;
-                setRadioState(RADIO_STATE_SIM_READY);
-            }
             else if (!netreg && !g_strcmp0(*ifArr, OFONO_IFACE_NETREG)) {
                 netreg = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_NETREG);
                 if (netreg) {
@@ -2201,6 +2192,22 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
             modemRevToken = 0;
         }
     }
+    else if (g_strcmp0(property, "Features") == 0) {
+        const gchar **fArr = g_value_peek_pointer(value);
+        while(*fArr) {
+            if (!goingOnline && g_strcmp0(*fArr, "rat") == 0) {
+                LOGW("rat available, going online");
+                GValue value = G_VALUE_INITIALIZATOR;
+                g_value_init(&value, G_TYPE_BOOLEAN);
+                g_value_set_boolean(&value, TRUE);
+                objSetProperty(modem, "Online", &value);
+                goingOnline = 1;
+                setRadioState(RADIO_STATE_SIM_READY);
+            }
+            fArr++;
+        }
+    }
+
 
     g_value_unset(value);
 }

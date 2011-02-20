@@ -214,6 +214,7 @@ static int objSetProperty(DBusGProxy *obj, const gchar *prop, GValue *value)
         if ( !dbus_g_proxy_call(obj, "SetProperty", &error,
                                 G_TYPE_STRING, prop,
                                 G_TYPE_VALUE, value,
+                                G_TYPE_INVALID,
                                 G_TYPE_INVALID) )
         {
             LOGE("%s->SetProperty(%s) to %p failed: %s",

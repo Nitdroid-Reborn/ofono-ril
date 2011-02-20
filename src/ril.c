@@ -90,6 +90,7 @@ typedef struct {
     RIL_Call        rilCall;
     RIL_Call        *rilCallPtr;
     char            number[30];
+    char            name[30];
     char            objPath[50];
 } ORIL_Call;
 
@@ -1628,6 +1629,9 @@ static void vcmCallAdded(DBusGProxy *proxy, const char *objPath,
     const GValue *number = g_hash_table_lookup(prop, "LineIdentification");
     strncpy(call->number, g_value_peek_pointer(number), sizeof(call->number));
 
+    const GValue *name = g_hash_table_lookup(prop, "Name");
+    strncpy(call->name, g_value_peek_pointer(name), sizeof(call->name));
+
     const GValue *state = g_hash_table_lookup(prop, "State");
     call->rilCall.state = ofonoStateToRILState(g_value_peek_pointer(state));
 
@@ -1637,7 +1641,7 @@ static void vcmCallAdded(DBusGProxy *proxy, const char *objPath,
     call->rilCall.toa = 145; // international format
     call->rilCall.isVoice = 1;
     call->rilCall.number = call->number;
-    call->rilCall.name = (char*)EMPTY;
+    call->rilCall.name = call->name;
     call->rilCall.uusInfo = NULL;
 
     if (RIL_CALL_INCOMING == call->rilCall.state) {
@@ -1647,7 +1651,7 @@ static void vcmCallAdded(DBusGProxy *proxy, const char *objPath,
     else //if (RIL_CALL_INCOMING == call->rilCall.state)
         call->rilCall.isMT = 0;
     /* Presentation: 0=Allowed, 1=Restricted, 2=Not Specified/Unknown 3=Payphone */
-    call->rilCall.namePresentation = 2;
+    call->rilCall.namePresentation = strlen(call->name) ? 0 : 2;
     call->rilCall.numberPresentation = strlen(call->number) ? 0 : 2;
 
     call->obj = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE,

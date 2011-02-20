@@ -1057,6 +1057,25 @@ static void requestBasebandVersion(void * data, size_t datalen, RIL_Token t)
     } 
 }
 
+static void setFastDormancy(gboolean state) {
+    GError * error = NULL;
+
+    if (!radiosettings) {
+        LOGE("Radiosettings proxy object doesn't exist");
+        return;
+    }
+
+    GValue value = G_VALUE_INITIALIZATOR;
+    g_value_init(&value, G_TYPE_BOOLEAN);
+    g_value_set_boolean(&value, state);
+
+    if(objSetProperty(radiosettings, "FastDormancy", &value)){
+        LOGE("Couldn't set fast dormancy");
+        return;
+    }
+
+}
+
 /*** Callback methods from the RIL library to us ***/
 
 /**
@@ -1199,6 +1218,7 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 
         case RIL_REQUEST_SCREEN_STATE:
             screenState = (*((int *)data) == 1) ? TRUE : FALSE;
+            setFastDormancy(!screenState);
             RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
             break;
         case RIL_REQUEST_SIGNAL_STRENGTH:

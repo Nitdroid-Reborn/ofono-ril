@@ -231,6 +231,7 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 
     assert (datalen >= sizeof(int *));
     onOff = ((int *)data)[0];
+    LOGD("requestRadioPower: %d", onOff);
 
     GValue value = G_VALUE_INITIALIZATOR;
     g_value_init(&value, G_TYPE_BOOLEAN);
@@ -1094,6 +1095,7 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
         && !(request == RIL_REQUEST_RADIO_POWER
              || request == RIL_REQUEST_GET_SIM_STATUS
              || request == RIL_REQUEST_GET_IMEI
+             || request == RIL_REQUEST_GET_IMEISV
              || request == RIL_REQUEST_BASEBAND_VERSION)
         ) {
         RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
@@ -1244,6 +1246,11 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             }
             else
                 imeiToken = t;
+            break;
+
+        case RIL_REQUEST_GET_IMEISV:
+            RIL_onRequestComplete(t, RIL_E_SUCCESS,
+                                  "02", sizeof(char *));
             break;
 
         case RIL_REQUEST_BASEBAND_VERSION:
@@ -1723,7 +1730,22 @@ static void sim_property_changed(DBusGProxy *proxy, const gchar *property,
     // may be property is changing now?
     if (!simIMSI[0] && !g_strcmp0(property, "SubscriberIdentity")) {
         strncpy(simIMSI, g_value_peek_pointer(value), sizeof(simIMSI));
-        //simStatus = SIM_READY;
+        RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_SIM_STATUS_CHANGED, 0, 0);
+    }
+    else if (SIM_ABSENT == simStatus && !g_strcmp0(property, "Present")) {
+        simStatus = g_value_get_boolean(value) ? SIM_READY : SIM_ABSENT;
+        RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_SIM_STATUS_CHANGED, 0, 0);
+    }
+    else if (!g_strcmp0(property, "PinRequired")) {
+        LOGD("PinRequired: %s", (char*) g_value_peek_pointer(value));
+        if ( !strcasecmp(g_value_peek_pointer(value), "pin") )
+            simStatus = SIM_PIN;
+        else if ( !strcasecmp(g_value_peek_pointer(value), "puk") )
+            simStatus = SIM_PUK;
+        else if ( strcasecmp(g_value_peek_pointer(value), "none") != 0 )
+            simStatus = SIM_NOT_READY; // FIXME
+
+        RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_SIM_STATUS_CHANGED, 0, 0);
     }
 
     g_value_unset(value);
@@ -1940,6 +1962,7 @@ static void initSimInterface()
                                     G_CALLBACK(sim_property_changed), sim, NULL);
         LOGW("Sim proxy created");
 
+#if 0
         GHashTable *dict = iface_get_properties(sim);
         if (!dict) {
             LOGE("SimManager.GetProperties failed");
@@ -1947,31 +1970,8 @@ static void initSimInterface()
         }
         g_hash_table_foreach(dict, (GHFunc)hash_entry_gvalue_print, NULL);
 
-        // Check sim card is present
-        simStatus = SIM_ABSENT;
-        GValue *value = (GValue *) g_hash_table_lookup(dict, "Present");
-        if (value) {
-            if (g_value_get_boolean(value)) {
-                simStatus = SIM_READY;
-            }
-        }
-        else
-            LOGE("No Present property!");
-
-        // what PIN is required?
-        if (simStatus == SIM_READY) {
-            value = (GValue *) g_hash_table_lookup(dict, "PinRequired");
-            LOGD("PinRequired: %s", (char*) g_value_peek_pointer(value));
-            if ( !strcasecmp(g_value_peek_pointer(value), "pin") )
-                simStatus = SIM_PIN;
-            else if ( !strcasecmp(g_value_peek_pointer(value), "puk") )
-                simStatus = SIM_PUK;
-            else if ( strcasecmp(g_value_peek_pointer(value), "none") != 0 )
-                simStatus = SIM_NOT_READY; // FIXME
-        }
-
         // Read IMSI
-        value = (GValue *) g_hash_table_lookup(dict, "SubscriberIdentity");
+        GValue *value = (GValue *) g_hash_table_lookup(dict, "SubscriberIdentity");
         if (value) {
             strncpy(simIMSI, g_value_peek_pointer(value), sizeof(simIMSI));
         }
@@ -1980,6 +1980,7 @@ static void initSimInterface()
         }
 
         g_hash_table_destroy(dict);
+#endif
     }
     else
         LOGE("Failed to create SIM proxy object");
@@ -2195,6 +2196,7 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
     else if (g_strcmp0(property, "Features") == 0) {
         const gchar **fArr = g_value_peek_pointer(value);
         while(*fArr) {
+            LOGD("  >> %s", *fArr);
             if (!goingOnline && g_strcmp0(*fArr, "rat") == 0) {
                 LOGW("rat available, going online");
                 GValue value = G_VALUE_INITIALIZATOR;
@@ -2203,6 +2205,9 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                 objSetProperty(modem, "Online", &value);
                 goingOnline = 1;
                 setRadioState(RADIO_STATE_SIM_READY);
+            }
+            else if (g_strcmp0(*fArr, "gprs") == 0) {
+                sendNetworkStateChanged();
             }
             fArr++;
         }

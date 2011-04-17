@@ -971,6 +971,23 @@ static void  requestEnterSimPin(void*  data, size_t  datalen, RIL_Token  t)
     RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 }
 
+static char getSupplementaryServicesState()
+{
+    char res = '0'; // fallback to USSD-Notify
+    GHashTable *dictProps = iface_get_properties(supsrv);
+    if (dictProps) {
+        GValue *value = (GValue*) g_hash_table_lookup(dictProps, "State");
+        if (value) {
+            if (!strcmp(g_value_peek_pointer(value), "user-response"))
+                res = '1';
+            g_value_unset(value);
+        }
+        g_hash_table_destroy(dictProps);
+    }
+
+    LOGD("srv_ussd_state: %c", res);
+    return res;
+}
 
 static void  requestSendUSSD(void *data, size_t datalen, RIL_Token t)
 {
@@ -981,29 +998,73 @@ static void  requestSendUSSD(void *data, size_t datalen, RIL_Token t)
         return;
     }
 
+    // get current SupplementaryServices state
+    char state = getSupplementaryServicesState();
+
     GError *error = NULL;
     char *request = 0;
-    GValue value = G_VALUE_INITIALIZATOR;
-    if (!dbus_g_proxy_call(supsrv, "Initiate", &error,
-                           G_TYPE_STRING, ussdRequest, G_TYPE_INVALID,
-                           G_TYPE_STRING, &request, G_TYPE_VALUE, &value, G_TYPE_INVALID))
-    {
+    char *strValue = 0;
+    int res;
+
+    // If USSD session is active in USSD-Response state,
+    // we use Respond method instead of Initiate
+    if (state == '1') {
+      res = dbus_g_proxy_call(supsrv, "Respond",
+                              &error,
+                              G_TYPE_STRING, ussdRequest, G_TYPE_INVALID,
+                              G_TYPE_STRING, &strValue, G_TYPE_INVALID);
+    }
+    else {
+        GValue value = G_VALUE_INITIALIZATOR;
+        res = dbus_g_proxy_call(supsrv, "Initiate",
+                                &error,
+                                G_TYPE_STRING, ussdRequest, G_TYPE_INVALID,
+                                G_TYPE_STRING, &request,
+                                G_TYPE_VALUE, &value, G_TYPE_INVALID);
+        strValue = g_strdup(g_value_peek_pointer(&value));
+        g_value_unset(&value);
+    }
+
+    if (!res || !strValue) {
         LOGE("supsrv.Initiate(%s) failed: %s",
              ussdRequest, error->message);
         RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
     }
     else {
-        LOGD("USSD response from network: %s, %s", request, (char*)g_value_peek_pointer(&value));
+        LOGD("USSD response from network: %s", strValue);
         RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 
+        // Get SupplementaryServices state again
+        char supSrvState[] = {0, 0};
+        supSrvState[0] = getSupplementaryServicesState();
+
         char *unsResp[2];
-        unsResp[0] = "0";
-        unsResp[1] = g_value_peek_pointer(&value);
+        unsResp[0] = supSrvState;
+        unsResp[1] = strValue;
         RIL_onUnsolicitedResponse(RIL_UNSOL_ON_USSD, unsResp, sizeof(unsResp));
 
         if (request) g_free(request);
-        g_value_unset(&value);
+        if (strValue) g_free(strValue);
     }
+}
+
+static void requestCancelUSSD(void * data, size_t datalen, RIL_Token t)
+{
+    RIL_Errno res = RIL_E_GENERIC_FAILURE;
+
+    if (supsrv) {
+        GError *error = NULL;
+        if (!dbus_g_proxy_call(supsrv, "Cancel", &error,
+                               G_TYPE_INVALID, G_TYPE_INVALID))
+        {
+            LOGE("supsrv.Cancel() failed: %s", error->message);
+        }
+        else {
+            res = RIL_E_SUCCESS;
+        }
+    }
+
+    RIL_onRequestComplete(t, res, NULL, 0);
 }
 
 static void requestGetRoamingPreference(void * data, size_t datalen, RIL_Token t)
@@ -1266,19 +1327,7 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
             break;
 
         case RIL_REQUEST_CANCEL_USSD:
-#if 0
-            p_response = NULL;
-            //err = at_send_command_numeric("AT+CUSD=2", &p_response);
-
-            if (err < 0 || p_response->success == 0) {
-                RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-            } else {
-                RIL_onRequestComplete(t, RIL_E_SUCCESS,
-                                      p_response->p_intermediates->line, sizeof(char *));
-            }
-#endif
-            RIL_onRequestComplete(t, RIL_E_SUCCESS,
-                                  "RIL_REQUEST_CANCEL_USSD", sizeof(char *));
+            requestCancelUSSD(data, datalen, t);
             break;
 
         case RIL_REQUEST_SET_NETWORK_SELECTION_AUTOMATIC:
@@ -1392,7 +1441,7 @@ static void onCancel (RIL_Token t)
 
 static const char * getVersion(void)
 {
-    return "NitDroid ofono-ril 0.0.7";
+    return "NitDroid ofono-ril 0.0.8";
 }
 
 void
@@ -1754,8 +1803,8 @@ static void sim_property_changed(DBusGProxy *proxy, const gchar *property,
 static void supsrvPropertyChanged(DBusGProxy *proxy, const gchar *property,
                                   GValue *value, gpointer user_data)
 {
-    // XXX
-    LOGW("supsrvPropertyChanged %s->%s", property, g_strdup_value_contents(value));
+    const char *propValue = g_value_peek_pointer(value);
+    LOGW("supsrvPropertyChanged %s->%s", property, propValue);
     g_value_unset(value);
 }
 

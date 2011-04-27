@@ -1918,6 +1918,10 @@ static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
         g_value_unset(value);
         return;
     }
+    else if (!g_strcmp0(property, "BaseStation")) {
+        // Shut it up
+        return;
+    }
     else if (!g_strcmp0(property, "CellId")) {
         netregCID = g_value_get_uint(value);
     }

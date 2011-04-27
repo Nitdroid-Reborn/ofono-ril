@@ -719,18 +719,26 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 
 static void requestSendSMS(void *data, size_t datalen, RIL_Token t)
 {
-    const char *smsc;
-    const char *pdu;
-    RIL_SMS_Response response;
+    if (!sms) {
+        RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
+        return;
+    }
 
-    smsc = ((const char **)data)[0];
-    pdu = ((const char **)data)[1];
-
+    const char *smsc = ((const char **)data)[0];
+    const char *pdu = ((const char **)data)[1];
     LOGD("requestSendSMS, %s, %s", smsc, pdu);
 
-    memset(&response, 0, sizeof(response));
+    GError *error = NULL;
+    GValue *value = 0;
+
+    int res = dbus_g_proxy_call(sms, "SendPdu",
+                                &error,
+                                G_TYPE_STRING, pdu, G_TYPE_INVALID,
+                                G_TYPE_VALUE, value, G_TYPE_INVALID);
 
     /* FIXME fill in messageRef and ackPDU */
+    RIL_SMS_Response response;
+    memset(&response, 0, sizeof(response));
     RIL_onRequestComplete(t, RIL_E_SUCCESS, &response, sizeof(response));
 }
 
@@ -1463,7 +1471,7 @@ static void onCancel (RIL_Token t)
 
 static const char * getVersion(void)
 {
-    return "NitDroid ofono-ril 0.0.8";
+    return "NITDroid ofono-ril 0.0.9";
 }
 
 void

@@ -51,7 +51,7 @@
 #include "marshaller.h"
 #include "cmtaudio.h"
 
-#define G_VALUE_INITIALIZATOR {0,{{0}}}
+#define G_VALUE_INITIALIZATOR {0,{{0}, {0}} }
 
 typedef enum {
     SIM_ABSENT = 0,
@@ -990,7 +990,6 @@ static char getSupplementaryServicesState()
         if (value) {
             if (!strcmp(g_value_peek_pointer(value), "user-response"))
                 res = '1';
-            g_value_unset(value);
         }
         g_hash_table_destroy(dictProps);
     }
@@ -1023,6 +1022,12 @@ static void  requestSendUSSD(void *data, size_t datalen, RIL_Token t)
                               &error,
                               G_TYPE_STRING, ussdRequest, G_TYPE_INVALID,
                               G_TYPE_STRING, &strValue, G_TYPE_INVALID);
+      if (!res) {
+          LOGE("supsrv.Respond(%s) failed: %s",
+               ussdRequest, error->message);
+          RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+          return;
+      }
     }
     else {
         GValue value = G_VALUE_INITIALIZATOR;
@@ -1031,16 +1036,19 @@ static void  requestSendUSSD(void *data, size_t datalen, RIL_Token t)
                                 G_TYPE_STRING, ussdRequest, G_TYPE_INVALID,
                                 G_TYPE_STRING, &request,
                                 G_TYPE_VALUE, &value, G_TYPE_INVALID);
-        strValue = g_strdup(g_value_peek_pointer(&value));
-        g_value_unset(&value);
+        if (res) {
+            strValue = g_strdup(g_value_get_string(&value));
+            g_value_unset(&value);
+        }
+        else {
+            LOGE("supsrv.Initiate(%s) failed: %s",
+                 ussdRequest, error->message);
+            RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+            return;
+        }
     }
 
-    if (!res || !strValue) {
-        LOGE("supsrv.Initiate(%s) failed: %s",
-             ussdRequest, error->message);
-        RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-    }
-    else {
+    if (strValue) {
         LOGD("USSD response from network: %s", strValue);
         RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 
@@ -1054,7 +1062,7 @@ static void  requestSendUSSD(void *data, size_t datalen, RIL_Token t)
         RIL_onUnsolicitedResponse(RIL_UNSOL_ON_USSD, unsResp, sizeof(unsResp));
 
         if (request) g_free(request);
-        if (strValue) g_free(strValue);
+        g_free(strValue);
     }
 }
 

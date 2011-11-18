@@ -35,11 +35,7 @@
 #include <cutils/sockets.h>
 #include <termios.h>
 
-#ifdef AOSP
 #include <netutils/ifc.h>
-#else
-#include <libnetutils/ifc_utils.h>
-#endif
 
 #define LOG_TAG "RIL"
 #include <utils/Log.h>
@@ -70,8 +66,8 @@ static int onSupports (int requestCode);
 static void onCancel (RIL_Token t);
 static const char *getVersion();
 static int isRadioOn();
-static int getCardStatus(RIL_CardStatus **pp_card_status);
-static void freeCardStatus(RIL_CardStatus *p_card_status);
+static int getCardStatus(RIL_CardStatus_v6 **pp_card_status);
+static void freeCardStatus(RIL_CardStatus_v6 *p_card_status);
 
 extern const char * requestToString(int request);
 
@@ -450,9 +446,11 @@ static void sendCallStateChanged(void *param)
 
 static void sendNetworkStateChanged()
 {
+#if 0
     RIL_onUnsolicitedResponse(
         RIL_UNSOL_RESPONSE_NETWORK_STATE_CHANGED,
         NULL, 0);
+#endif
 }
 
 static void requestAnswer(RIL_Token t)
@@ -647,19 +645,16 @@ static void requestHangup(RIL_Token t, int line, int state)
 
 static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 {
-    RIL_SignalStrength st;
+    int response[2];
 
     int strength = (netregStrength*31)/100;
     if (strength == 0)
         strength = 99;
 
-    st.GW_SignalStrength.signalStrength = strength;
-    st.GW_SignalStrength.bitErrorRate = 0;
+    response[0] = strength;
+    response[1] = 0;
 
-    if (t)
-        RIL_onRequestComplete(t, RIL_E_SUCCESS, &st, sizeof(st));
-    else
-        RIL_onUnsolicitedResponse(RIL_UNSOL_SIGNAL_STRENGTH, &st, sizeof(st));
+    RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
 }
 
 static void requestGPRSRegistrationState(void *data, size_t datalen, RIL_Token t)
@@ -1202,7 +1197,7 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 
     switch (request) {
         case RIL_REQUEST_GET_SIM_STATUS: {
-            RIL_CardStatus *p_card_status;
+            RIL_CardStatus_v6 *p_card_status;
             char *p_buffer;
             int buffer_size;
 
@@ -1304,10 +1299,10 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
         case RIL_REQUEST_SIGNAL_STRENGTH:
             requestSignalStrength(data, datalen, t);
             break;
-        case RIL_REQUEST_REGISTRATION_STATE:
+        case RIL_REQUEST_VOICE_REGISTRATION_STATE:
             requestRegistrationState(data, datalen, t);
             break;
-        case RIL_REQUEST_GPRS_REGISTRATION_STATE:
+        case RIL_REQUEST_DATA_REGISTRATION_STATE:
             requestGPRSRegistrationState(data, datalen, t);
             break;
         case RIL_REQUEST_OPERATOR:
@@ -1545,7 +1540,7 @@ getSIMStatus()
  * This must be freed using freeCardStatus.
  * @return: On success returns RIL_E_SUCCESS
  */
-static int getCardStatus(RIL_CardStatus **pp_card_status) {
+static int getCardStatus(RIL_CardStatus_v6 **pp_card_status) {
     static RIL_AppStatus app_status_array[] = {
         // SIM_ABSENT = 0
         { RIL_APPTYPE_UNKNOWN, RIL_APPSTATE_UNKNOWN, RIL_PERSOSUBSTATE_UNKNOWN,
@@ -1579,7 +1574,7 @@ static int getCardStatus(RIL_CardStatus **pp_card_status) {
     }
 
     // Allocate and initialize base card status.
-    RIL_CardStatus *p_card_status = malloc(sizeof(RIL_CardStatus));
+    RIL_CardStatus_v6 *p_card_status = malloc(sizeof(RIL_CardStatus_v6));
     p_card_status->card_state = card_state;
     p_card_status->universal_pin_state = RIL_PINSTATE_UNKNOWN;
     p_card_status->gsm_umts_subscription_app_index = RIL_CARD_MAX_APPS;
@@ -1610,7 +1605,7 @@ static int getCardStatus(RIL_CardStatus **pp_card_status) {
 /**
  * Free the card status returned by getCardStatus
  */
-static void freeCardStatus(RIL_CardStatus *p_card_status) {
+static void freeCardStatus(RIL_CardStatus_v6 *p_card_status) {
     free(p_card_status);
 }
 

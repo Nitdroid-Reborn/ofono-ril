@@ -136,8 +136,6 @@ static gboolean connmanAttached = FALSE;
 // XXX not thread safe?
 static char ipDataCall[16];
 static const char gprsIfName[] = "gprs0";
-// we always use only one context for PDC: primarycontext1
-static const char *responseDataCall[3] = { "1", gprsIfName, ipDataCall };
 static RIL_Token dataCallToken, poweredToken, imeiToken, modemRevToken;
 static gboolean pdcActive = FALSE;
 static gboolean roamingAllowed = FALSE;
@@ -446,11 +444,9 @@ static void sendCallStateChanged(void *param)
 
 static void sendNetworkStateChanged()
 {
-#if 0
     RIL_onUnsolicitedResponse(
-        RIL_UNSOL_RESPONSE_NETWORK_STATE_CHANGED,
+        RIL_UNSOL_RESPONSE_VOICE_NETWORK_STATE_CHANGED,
         NULL, 0);
-#endif
 }
 
 static void requestAnswer(RIL_Token t)
@@ -806,7 +802,7 @@ static void requestDeactivateDataCall(void *data, size_t datalen, RIL_Token t)
 
 static int setupIP()
 {
-    in_addr_t ip = inet_addr(responseDataCall[2]);
+    in_addr_t ip = inet_addr(ipDataCall);
     if (ifc_set_addr(gprsIfName, ip)) {
         LOGE("Can't set IP address: %s", strerror(errno));
         return 0;
@@ -851,12 +847,21 @@ static void getIP()
             goto error;
         }
 
-        if (setupIP()) {
-            RIL_onRequestComplete(dataCallToken, RIL_E_SUCCESS, responseDataCall, sizeof(responseDataCall));
-            ifc_close();
-            return;
-        }
+        RIL_Data_Call_Response_v6 resp;
+        memset(&resp, sizeof(resp), 0);
+
+        resp.status = PDP_FAIL_NONE;
+        resp.cid = 1; // we always use only single PDP context
+        resp.active = setupIP() ? 2 : 1; // 0=inactive, 1=active/physical link down, 2=active/physical link up
+        resp.type = "IP";
+        resp.ifname = gprsIfName;
+        resp.addresses = ipDataCall;
+        resp.dnses = "8.8.4.4 8.8.8.8";
+        resp.gateways = ""; // May be empty in which case the addresses represent PPP connections
+
+        RIL_onRequestComplete(dataCallToken, RIL_E_SUCCESS, &resp, sizeof(resp));
         ifc_close();
+        return;
     }
     else
         LOGE("No IP Address in Properties:Settings");

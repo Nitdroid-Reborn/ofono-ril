@@ -645,16 +645,17 @@ static void requestHangup(RIL_Token t, int line, int state)
 
 static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 {
-    int response[2];
+    RIL_SignalStrength_v6 st;
+    memset(&st, sizeof(st), 0);
 
     int strength = (netregStrength*31)/100;
     if (strength == 0)
         strength = 99;
 
-    response[0] = strength;
-    response[1] = 0;
-
-    RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
+    if (t)
+        RIL_onRequestComplete(t, RIL_E_SUCCESS, &st, sizeof(st));
+    else
+        RIL_onUnsolicitedResponse(RIL_UNSOL_SIGNAL_STRENGTH, &st, sizeof(st));
 }
 
 static void requestGPRSRegistrationState(void *data, size_t datalen, RIL_Token t)

@@ -56,7 +56,7 @@ endif
 
 LOCAL_LDLIBS += -lpthread
 
-ifeq ($(TARGET_PRODUCT),n900)
+ifeq ($(TARGET_PRODUCT),n900-temporary-disabled)
 LOCAL_C_INCLUDES += \
 	external/libcmtspeechdata \
 	frameworks/base/include/media

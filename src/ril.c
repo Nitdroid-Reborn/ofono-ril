@@ -656,10 +656,17 @@ static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 
 static void requestGPRSRegistrationState(void *data, size_t datalen, RIL_Token t)
 {
-    char *responseStr[4];
+    char *responseStr[5];
     memset(responseStr, sizeof(responseStr), 0);
 
+    // if registration state is 3 (Registration denied) this is an enumerated reason why
+    // registration was denied.  See 3GPP TS 24.008,
+    // Annex G.6 "Additonal cause codes for GMM".
+    responseStr[4] = "0";
+
     switch(netregStatus) {
+        case 3:
+            responseStr[4] = "7"; // GPRS services not allowed
         case 1:
         case 5:
             asprintf(&responseStr[0], "%d", connmanAttached ? 1 : 0);
@@ -1949,6 +1956,7 @@ static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
         const gchar *status = g_value_peek_pointer(value);
         if (!g_strcmp0(status, "searching")) {
             netregStatus = 2; // Not registered, but MT is currently searching
+            connmanAttached = 0;
         }
         else if (!g_strcmp0(status, "registered")) {
             netregStatus = 1;
@@ -1978,16 +1986,16 @@ static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
     else if (!g_strcmp0(property, "Technology")) {
         const gchar *tech = g_value_peek_pointer(value);
         if (!g_strcmp0(tech, "gsm")){
-            netregTech = 1;
+            netregTech = RADIO_TECH_GPRS;
         }else if (!g_strcmp0(tech, "edge")){
-            netregTech = 2;
+            netregTech = RADIO_TECH_EDGE;
         }else if (!g_strcmp0(tech, "umts")){
-            netregTech = 3;
+            netregTech = RADIO_TECH_UMTS;
         }else if (!g_strcmp0(tech, "hspa")){
-            netregTech = 11;
-        }else if (!g_strcmp0(tech, "lte")){
+            netregTech = RADIO_TECH_HSPA;
+        }else {
             /* RIL doesn't support LTE, report unknown */
-            netregTech = 11;
+            netregTech = RADIO_TECH_UNKNOWN;
         }
     }
     else if (!g_strcmp0(property, "Mode")) {

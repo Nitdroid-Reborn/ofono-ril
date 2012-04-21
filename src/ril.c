@@ -2107,6 +2107,15 @@ static void initConnManager()
         return;
     }
 
+    // set property "RoamingAllowed" to "true"
+    // Android care about dis/allowing data while in roaming
+    {
+        GValue value = G_VALUE_INITIALIZATOR;
+        g_value_init(&value, G_TYPE_BOOLEAN);
+        g_value_set_boolean(&value, TRUE);
+        objSetProperty(connman, "RoamingAllowed", &value);
+    }
+
     // find existing context
     LOGD("Trying to find existing context");
     char *pdcPath = NULL;

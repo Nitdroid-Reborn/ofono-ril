@@ -165,7 +165,7 @@ static void setRadioState(RIL_RadioState newState);
 static void hash_entry_gvalue_print(const gchar *key, GValue *val, gpointer userdata)
 {
     char *str = g_strdup_value_contents(val);
-    LOGD("[\"%s\"] = %s", key, str);
+    ALOGD("[\"%s\"] = %s", key, str);
     free(str);
 }
 
@@ -178,7 +178,7 @@ static RIL_CallState ofonoStateToRILState(const gchar *state)
     if (!g_strcmp0(state, "incoming")) return RIL_CALL_INCOMING;
     if (!g_strcmp0(state, "waiting")) return RIL_CALL_WAITING;
 
-    LOGE("Bad callstate: %s", state);
+    ALOGE("Bad callstate: %s", state);
     return (RIL_CallState) 0xffffffff;
 }
 
@@ -211,7 +211,7 @@ static int objSetProperty(DBusGProxy *obj, const gchar *prop, GValue *value)
                                 G_TYPE_INVALID,
                                 G_TYPE_INVALID) )
         {
-            LOGE("%s->SetProperty(%s) to %p failed: %s",
+            ALOGE("%s->SetProperty(%s) to %p failed: %s",
                  dbus_g_proxy_get_bus_name(obj),
                  prop, value, error->message);
         }
@@ -227,7 +227,7 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 
     assert (datalen >= sizeof(int *));
     onOff = ((int *)data)[0];
-    LOGD("requestRadioPower: %d", onOff);
+    ALOGD("requestRadioPower: %d", onOff);
 
     GValue value = G_VALUE_INITIALIZATOR;
     g_value_init(&value, G_TYPE_BOOLEAN);
@@ -276,11 +276,11 @@ static void requestQueryAvailableNetworks(
     DBusGProxy * proxy;
 
     if (!netreg) {
-        LOGE("Netreg proxy doesn't exist");
+        ALOGE("Netreg proxy doesn't exist");
         RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
         return;
     }
-    LOGD("proxy manager - ok");
+    ALOGD("proxy manager - ok");
 
     GPtrArray *ops = 0;
     /* Timeout after 15 minutes because Operator Scan takes looooooong */
@@ -288,18 +288,18 @@ static void requestQueryAvailableNetworks(
                                         type_a_oa_sv, &ops,
                                         G_TYPE_INVALID))
     {
-        LOGE(".GetOperators failed: %s", error->message);
+        ALOGE(".GetOperators failed: %s", error->message);
         RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
         return;
     }
 
     if (!ops || !ops->len) {
-        LOGE("ops->len is empty.");
+        ALOGE("ops->len is empty.");
         RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
         return;
     }
 
-    LOGD("Got an operator array : len %d", ops->len);
+    ALOGD("Got an operator array : len %d", ops->len);
     char * response[ops->len*4];
     for(i=0; i < ops->len; i++){
         opParams = (GHashTable *)g_value_get_boxed(g_value_array_get_nth(ops->pdata[i], 1)); 
@@ -308,7 +308,7 @@ static void requestQueryAvailableNetworks(
         GValue *mcc = (GValue *) g_hash_table_lookup(opParams, "MobileCountryCode");
         GValue *mnc = (GValue *) g_hash_table_lookup(opParams, "MobileNetworkCode");
 
-        LOGD("Operator : %s, name %s", 
+        ALOGD("Operator : %s, name %s", 
              (char *)g_value_get_boxed(g_value_array_get_nth(ops->pdata[i], 0)), 
              (char *)g_value_peek_pointer(name));
 
@@ -337,11 +337,11 @@ static void requestRegisterNetwork(
     DBusGProxy * proxy;
 
     snprintf(objPath, sizeof(objPath), "%s/operator/%s", MODEM,mccmnc);
-    LOGD("Object path : %s",objPath);
+    ALOGD("Object path : %s",objPath);
 
     proxy = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, objPath, OFONO_IFACE_NETOP);
     if (!proxy) {
-        LOGE("Failed to create Manager proxy object");
+        ALOGE("Failed to create Manager proxy object");
         RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
         return;
     }
@@ -349,7 +349,7 @@ static void requestRegisterNetwork(
     if (!dbus_g_proxy_call(proxy, "Register", &error, G_TYPE_INVALID,
                            G_TYPE_INVALID))
     {
-        LOGE(".Register failed: %s", error->message);
+        ALOGE(".Register failed: %s", error->message);
         RIL_onRequestComplete(t, RIL_E_ILLEGAL_SIM_OR_ME, NULL, 0);
         return;
     }
@@ -366,25 +366,25 @@ static void requestGetPreferredNetworkType(
     GError * error = NULL;
 
     if (!radiosettings) {
-        LOGE("Radiosettings proxy doesn't exist");
+        ALOGE("Radiosettings proxy doesn't exist");
         RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
         return;
     }
 
     GHashTable *dictProps = iface_get_properties(radiosettings);
     if (!dictProps) {
-        LOGD("!dictProps");
+        ALOGD("!dictProps");
         RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
         return;
     }
 
     GValue *valueSettings = (GValue*) g_hash_table_lookup(dictProps, "TechnologyPreference");
     if (!valueSettings) {
-        LOGE("!valueSettings");
+        ALOGE("!valueSettings");
         RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
         return;
     }
-    LOGD("valueSettings-ok");
+    ALOGD("valueSettings-ok");
     preferred = g_value_peek_pointer(valueSettings);
 
     if (!g_strcmp0(preferred, "any")) {
@@ -409,7 +409,7 @@ static void requestSetPreferredNetworkType(
     GError * error = NULL;
 
     if (!radiosettings) {
-        LOGE("Radiosettings proxy object doesn't exist");
+        ALOGE("Radiosettings proxy object doesn't exist");
         RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
         return;
     }
@@ -461,7 +461,7 @@ static void requestAnswer(RIL_Token t)
         if (RIL_CALL_INCOMING == call->rilCall.state) {
             found = 1;
             if (!dbus_g_proxy_call(call->obj, "Answer", &error, G_TYPE_INVALID, G_TYPE_INVALID))
-                LOGE("Call->Answer failed: %s", error->message);
+                ALOGE("Call->Answer failed: %s", error->message);
             RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED, 0, 0);
             break;
         }
@@ -469,7 +469,7 @@ static void requestAnswer(RIL_Token t)
     pthread_mutex_unlock(&lock);
 
     if (!found)
-        LOGW("Can't answer: call not found");
+        ALOGW("Can't answer: call not found");
 
     /* success or failure is ignored by the upper layer here.
        it will call GET_CURRENT_CALLS and determine success that way */
@@ -484,7 +484,7 @@ static GHashTable* iface_get_properties(DBusGProxy *proxy)
                            dbus_g_type_get_map("GHashTable", G_TYPE_STRING, G_TYPE_VALUE), &dict,
                            G_TYPE_INVALID))
     {
-        LOGE(".GetProperties failed: %s", error->message);
+        ALOGE(".GetProperties failed: %s", error->message);
         return 0;
     }
 
@@ -497,9 +497,9 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
     GSList *l;
     RIL_Call **pp_calls;
 
-    LOGD("requestGetCurrentCalls");
+    ALOGD("requestGetCurrentCalls");
     if (!vcm) {
-        LOGE("!VCM");
+        ALOGE("!VCM");
         RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
         return;
     }
@@ -515,7 +515,7 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
     RIL_onRequestComplete(t, RIL_E_SUCCESS, pp_calls,
                           countCalls * sizeof (RIL_Call *));
     pthread_mutex_unlock(&lock);
-    LOGD("countCalls: %d", countCalls);
+    ALOGD("countCalls: %d", countCalls);
 
     return;
 }
@@ -541,7 +541,7 @@ static void requestDial(void *data, size_t datalen, RIL_Token t)
                            G_TYPE_STRING, p_dial->address, G_TYPE_STRING, clir,
                            G_TYPE_INVALID, G_TYPE_VALUE, value, G_TYPE_INVALID))
     {
-        LOGE("VCM.Dial(%s, %s) failed: %s",
+        ALOGE("VCM.Dial(%s, %s) failed: %s",
              p_dial->address, clir, error->message);
     }
 
@@ -568,7 +568,7 @@ static void requestDTMF(void *data, size_t datalen, RIL_Token t)
     if (!dbus_g_proxy_call(vcm, "SendTones", &error,
                            G_TYPE_STRING, tones,
                            G_TYPE_INVALID, G_TYPE_INVALID)) {
-        LOGE("VoiceCallManager.SendTones failed: %s", error->message);
+        ALOGE("VoiceCallManager.SendTones failed: %s", error->message);
         res = RIL_E_GENERIC_FAILURE;
     }
 
@@ -624,7 +624,7 @@ static void requestHangup(RIL_Token t, int line, int state)
             found = 1;
             GError *error = NULL;
             if (!dbus_g_proxy_call(call->obj, "Hangup", &error, G_TYPE_INVALID, G_TYPE_INVALID))
-                LOGE("VoiceCall.Hangup failed for line %d: %s", line, error->message);
+                ALOGE("VoiceCall.Hangup failed for line %d: %s", line, error->message);
             RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED, 0, 0);
             break;
         }
@@ -632,7 +632,7 @@ static void requestHangup(RIL_Token t, int line, int state)
     pthread_mutex_unlock(&lock);
 
     if (!found)
-        LOGW("requestHangup failed: line/state %d/%d not found", line, state);
+        ALOGW("requestHangup failed: line/state %d/%d not found", line, state);
 
     /* success or failure is ignored by the upper layer here.
        it will call GET_CURRENT_CALLS and determine success that way */
@@ -673,7 +673,7 @@ static void requestGPRSRegistrationState(void *data, size_t datalen, RIL_Token t
             asprintf(&responseStr[1], "%x", netregLAC);
             asprintf(&responseStr[2], "%x", netregCID);
             asprintf(&responseStr[3], "%d", netregTech);
-            LOGD("requestGPRSRegistrationState success");
+            ALOGD("requestGPRSRegistrationState success");
             RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, sizeof(responseStr));
             break;
         default:
@@ -691,7 +691,7 @@ static void requestRegistrationState(void *data, size_t datalen, RIL_Token t)
         asprintf(&responseStr[1], "%x", netregLAC);
         asprintf(&responseStr[2], "%x", netregCID);
         asprintf(&responseStr[3], "%d", netregTech);
-        LOGD("requestRegistrationState success");
+        ALOGD("requestRegistrationState success");
         RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, sizeof(responseStr));
         for (unsigned i = 0; i < sizeof(responseStr)/sizeof(char*); i++)
             if (responseStr[i]) free(responseStr[i]);
@@ -725,7 +725,7 @@ static void requestSendSMS(void *data, size_t datalen, RIL_Token t)
 
     const char *smsc = ((const char **)data)[0];
     const char *pdu = ((const char **)data)[1];
-    LOGD("requestSendSMS, %s, %s", smsc, pdu);
+    ALOGD("requestSendSMS, %s, %s", smsc, pdu);
 
     GError *error = NULL;
     GValue *value = 0;
@@ -744,7 +744,7 @@ static void requestSendSMS(void *data, size_t datalen, RIL_Token t)
 static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
 {
     if (!connmanAttached) {
-        LOGW("requestSetupDataCall exit, connman is not in Attached state");
+        ALOGW("requestSetupDataCall exit, connman is not in Attached state");
         RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
         return;
     }
@@ -753,7 +753,7 @@ static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
     const char *apn  = ((const char **)data)[2];
     const char *user = ((const char **)data)[3];
     const char *pswd = ((const char **)data)[4];
-    LOGD("requestSetupDataCall, %s, %s, %s", apn, user, pswd);
+    ALOGD("requestSetupDataCall, %s, %s, %s", apn, user, pswd);
 
     // APN
     {
@@ -791,7 +791,7 @@ static void requestSetupDataCall(void *data, size_t datalen, RIL_Token t)
         objSetProperty(pdc, "Active", &value);
     }
 
-    LOGW("Data connection setup: success");
+    ALOGW("Data connection setup: success");
     //RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
     //RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
@@ -811,15 +811,15 @@ static int setupIP()
 {
     in_addr_t ip = inet_addr(ipDataCall);
     if (ifc_set_addr(gprsIfName, ip)) {
-        LOGE("Can't set IP address: %s", strerror(errno));
+        ALOGE("Can't set IP address: %s", strerror(errno));
         return 0;
     }
     if (ifc_up(gprsIfName)) {
-        LOGE("Can't UP network interface: %s", strerror(errno));
+        ALOGE("Can't UP network interface: %s", strerror(errno));
         return 0;
     }
     if (ifc_set_default_route(gprsIfName, ip)) {
-        LOGE("Can't set default route: %s", strerror(errno));
+        ALOGE("Can't set default route: %s", strerror(errno));
         return 0;
     }
     return 1;
@@ -827,30 +827,30 @@ static int setupIP()
 
 static void getIP()
 {
-    LOGD("getIP called");
+    ALOGD("getIP called");
 
     // Get IP address of new connection
     GHashTable *dictProps = iface_get_properties(pdc);
     if (!dictProps) {
-        LOGD("!dictProps");
+        ALOGD("!dictProps");
         goto error;
     }
 
     GValue *valueSettings = (GValue*) g_hash_table_lookup(dictProps, "Settings");
     if (!valueSettings) {
-        LOGE("!valueSettings");
+        ALOGE("!valueSettings");
         goto error;
     }
-    LOGD("valueSettings-ok");
+    ALOGD("valueSettings-ok");
     GHashTable *dictSettings = (GHashTable*) g_value_peek_pointer(valueSettings);
     GValue *value = (GValue *) g_hash_table_lookup(dictSettings, "Address");
-    LOGD("Address: %p", value);
+    ALOGD("Address: %p", value);
     if (value && g_value_peek_pointer(value)) {
         strncpy(ipDataCall, g_value_peek_pointer(value), sizeof(ipDataCall));
-        LOGW("IP Address=%s", ipDataCall);
+        ALOGW("IP Address=%s", ipDataCall);
 
         if (ifc_init() != 0) {
-            LOGE("ifc_init failed");
+            ALOGE("ifc_init failed");
             goto error;
         }
 
@@ -871,10 +871,10 @@ static void getIP()
         return;
     }
     else
-        LOGE("No IP Address in Properties:Settings");
+        ALOGE("No IP Address in Properties:Settings");
 
 error:
-    LOGE("getIP: ERROR!!!");
+    ALOGE("getIP: ERROR!!!");
     RIL_onRequestComplete(dataCallToken, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
@@ -891,7 +891,7 @@ static void requestSMSAcknowledge(void *data, size_t datalen, RIL_Token t)
     } else if (ackSuccess == 0)  {
         err = at_send_command("AT+CNMA=2", NULL);
     } else {
-        LOGE("unsupported arg to RIL_REQUEST_SMS_ACKNOWLEDGE\n");
+        ALOGE("unsupported arg to RIL_REQUEST_SMS_ACKNOWLEDGE\n");
         goto error;
     }
 
@@ -1002,7 +1002,7 @@ static char getSupplementaryServicesState()
         g_hash_table_destroy(dictProps);
     }
 
-    LOGD("srv_ussd_state: %c", res);
+    ALOGD("srv_ussd_state: %c", res);
     return res;
 }
 
@@ -1031,7 +1031,7 @@ static void  requestSendUSSD(void *data, size_t datalen, RIL_Token t)
                               G_TYPE_STRING, ussdRequest, G_TYPE_INVALID,
                               G_TYPE_STRING, &strValue, G_TYPE_INVALID);
       if (!res) {
-          LOGE("supsrv.Respond(%s) failed: %s",
+          ALOGE("supsrv.Respond(%s) failed: %s",
                ussdRequest, error->message);
           RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
           return;
@@ -1049,7 +1049,7 @@ static void  requestSendUSSD(void *data, size_t datalen, RIL_Token t)
             g_value_unset(&value);
         }
         else {
-            LOGE("supsrv.Initiate(%s) failed: %s",
+            ALOGE("supsrv.Initiate(%s) failed: %s",
                  ussdRequest, error->message);
             RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
             return;
@@ -1057,7 +1057,7 @@ static void  requestSendUSSD(void *data, size_t datalen, RIL_Token t)
     }
 
     if (strValue) {
-        LOGD("USSD response from network: %s", strValue);
+        ALOGD("USSD response from network: %s", strValue);
         RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 
         // Get SupplementaryServices state again
@@ -1083,7 +1083,7 @@ static void requestCancelUSSD(void * data, size_t datalen, RIL_Token t)
         if (!dbus_g_proxy_call(supsrv, "Cancel", &error,
                                G_TYPE_INVALID, G_TYPE_INVALID))
         {
-            LOGE("supsrv.Cancel() failed: %s", error->message);
+            ALOGE("supsrv.Cancel() failed: %s", error->message);
         }
         else {
             res = RIL_E_SUCCESS;
@@ -1111,7 +1111,7 @@ static void requestSetRoamingPreference(void * data, size_t datalen, RIL_Token t
     GError * error = NULL;
 
     if (!connman) {
-        LOGE("Connman proxy object doesn't exist");
+        ALOGE("Connman proxy object doesn't exist");
         RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
         return;
     }
@@ -1148,7 +1148,7 @@ static void setFastDormancy(gboolean state) {
     GError * error = NULL;
 
     if (!radiosettings) {
-        LOGE("Radiosettings proxy object doesn't exist");
+        ALOGE("Radiosettings proxy object doesn't exist");
         return;
     }
 
@@ -1157,7 +1157,7 @@ static void setFastDormancy(gboolean state) {
     g_value_set_boolean(&value, state);
 
     if(objSetProperty(radiosettings, "FastDormancy", &value)){
-        LOGE("Couldn't set fast dormancy");
+        ALOGE("Couldn't set fast dormancy");
         return;
     }
 
@@ -1182,7 +1182,7 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 {
     int err;
 
-    LOGD("onRequest: %s", requestToString(request));
+    ALOGD("onRequest: %s", requestToString(request));
 
     /* Ignore all requests except RIL_REQUEST_GET_SIM_STATUS
      * when RADIO_STATE_UNAVAILABLE.
@@ -1412,12 +1412,12 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
                 int i;
                 const char ** cur;
 
-                LOGD("got OEM_HOOK_STRINGS: 0x%8p %lu", data, (long)datalen);
+                ALOGD("got OEM_HOOK_STRINGS: 0x%8p %lu", data, (long)datalen);
 
 
                 for (i = (datalen / sizeof (char *)), cur = (const char **)data ;
                      i > 0 ; cur++, i --) {
-                    LOGD("> '%s'", *cur);
+                    ALOGD("> '%s'", *cur);
                 }
 
                 // echo back strings
@@ -1646,9 +1646,9 @@ static void waitForClose()
 
 static void* mainLoop(void *param)
 {
-    LOGD("Running main loop");
+    ALOGD("Running main loop");
     g_main_loop_run(loop);
-    LOGE("Main loop ended");
+    ALOGE("Main loop ended");
 
     return 0;
 }
@@ -1657,7 +1657,7 @@ static void callPropertyChanged(DBusGProxy *proxy, const gchar *property,
                                 GValue *value, gpointer priv)
 {
     int callIndex = (int) priv;
-    LOGD("callPropertyChanged(%d): %s->%s", callIndex, property, (char*)g_value_peek_pointer(value));
+    ALOGD("callPropertyChanged(%d): %s->%s", callIndex, property, (char*)g_value_peek_pointer(value));
 
     if (!g_strcmp0(property, "State")) {
         GSList *l;
@@ -1681,7 +1681,7 @@ static void callPropertyChanged(DBusGProxy *proxy, const gchar *property,
             RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED, NULL, 0);
 
         if (!found)
-            LOGW("BUG? Call not found");
+            ALOGW("BUG? Call not found");
     }
 
     g_value_unset(value);
@@ -1690,19 +1690,19 @@ static void callPropertyChanged(DBusGProxy *proxy, const gchar *property,
 static void callDisconnectReason(DBusGProxy *proxy, const gchar *reason,
                                  gpointer priv)
 {
-    LOGW("callDisconnectReason: %s", reason);
+    ALOGW("callDisconnectReason: %s", reason);
 }
 
 static void vcmPropertyChanged(DBusGProxy *proxy, const gchar *property,
                                GValue *value, gpointer user_data)
 {
     // XXX
-    LOGW("vcm_property_changed %s->%s", property, g_strdup_value_contents(value));
+    ALOGW("vcm_property_changed %s->%s", property, g_strdup_value_contents(value));
 
     if (!g_strcmp0("Calls", property)) {
         GPtrArray *callArr = g_value_peek_pointer(value);
         if (!callArr->len) {
-            LOGD("Calls is empty. Disconnected?");
+            ALOGD("Calls is empty. Disconnected?");
         }
 
         RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
@@ -1714,12 +1714,12 @@ static void vcmPropertyChanged(DBusGProxy *proxy, const gchar *property,
 static void vcmCallAdded(DBusGProxy *proxy, const char *objPath,
                          GHashTable *prop, gpointer priv)
 {
-    LOGD("vcmCallAdded: %s", objPath);
+    ALOGD("vcmCallAdded: %s", objPath);
     g_hash_table_foreach(prop, (GHFunc)hash_entry_gvalue_print, NULL);
 
     ORIL_Call *call = malloc(sizeof(ORIL_Call));
     if (!call) {
-        LOGE("vcmCallAdded failed: ENOMEM");
+        ALOGE("vcmCallAdded failed: ENOMEM");
         return;
     }
 
@@ -1782,7 +1782,7 @@ static void vcmCallAdded(DBusGProxy *proxy, const char *objPath,
 
 static void vcmCallRemoved(DBusGProxy *proxy, const char *objPath, gpointer priv)
 {
-    LOGD("vcmCallRemoved: %s", objPath);
+    ALOGD("vcmCallRemoved: %s", objPath);
 
     GSList *l;
     int found = 0;
@@ -1806,14 +1806,14 @@ static void vcmCallRemoved(DBusGProxy *proxy, const char *objPath, gpointer priv
 
     RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED, 0, 0);
     if (!found)
-        LOGE("call not found: %s", objPath);
+        ALOGE("call not found: %s", objPath);
 }
 
 static void audioSettingsPropertyChanged(DBusGProxy *proxy, const gchar *property,
                                          GValue *value, gpointer priv)
 {
     // XXX
-    LOGW("audioSettingsPropertyChanged %s->%s", property, g_strdup_value_contents(value));
+    ALOGW("audioSettingsPropertyChanged %s->%s", property, g_strdup_value_contents(value));
     if (!g_strcmp0(property, "Active"))
         cmtAudioSetActive(g_value_get_boolean(value) ? 1 : 0);
 }
@@ -1822,7 +1822,7 @@ static void sim_property_changed(DBusGProxy *proxy, const gchar *property,
                                  GValue *value, gpointer user_data)
 {
     // XXX
-    LOGW("sim_property_changed %s->%s", property, g_strdup_value_contents(value));
+    ALOGW("sim_property_changed %s->%s", property, g_strdup_value_contents(value));
 
     // sometimes we don't have IMSI at interface creation time
     // may be property is changing now?
@@ -1835,7 +1835,7 @@ static void sim_property_changed(DBusGProxy *proxy, const gchar *property,
         RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_SIM_STATUS_CHANGED, 0, 0);
     }
     else if (!g_strcmp0(property, "PinRequired")) {
-        LOGD("PinRequired: %s", (char*) g_value_peek_pointer(value));
+        ALOGD("PinRequired: %s", (char*) g_value_peek_pointer(value));
         if ( !strcasecmp(g_value_peek_pointer(value), "pin") )
             simStatus = SIM_PIN;
         else if ( !strcasecmp(g_value_peek_pointer(value), "puk") )
@@ -1853,7 +1853,7 @@ static void supsrvPropertyChanged(DBusGProxy *proxy, const gchar *property,
                                   GValue *value, gpointer user_data)
 {
     const char *propValue = g_value_peek_pointer(value);
-    LOGW("supsrvPropertyChanged %s->%s", property, propValue);
+    ALOGW("supsrvPropertyChanged %s->%s", property, propValue);
     g_value_unset(value);
 }
 
@@ -1861,21 +1861,21 @@ static void supsrvRequestReceived(DBusGProxy *proxy, const gchar *message,
                                   gpointer user_data)
 {
     // XXX
-    LOGW("supsrvRequestReceived %s", message);
+    ALOGW("supsrvRequestReceived %s", message);
 }
 
 static void sms_property_changed(DBusGProxy *proxy, const gchar *property,
                                  GValue *value, gpointer user_data)
 {
     // XXX
-    LOGW("sms_property_changed %s->%s", property, g_strdup_value_contents(value));
+    ALOGW("sms_property_changed %s->%s", property, g_strdup_value_contents(value));
     g_value_unset(value);
 }
 
 static void smsImmediateMessage(DBusGProxy *proxy, const gchar *message,
                                 GHashTable *dict, gpointer userData)
 {
-    LOGD("smsImmediateMessage: %s", message);
+    ALOGD("smsImmediateMessage: %s", message);
 }
 
 extern int encodePDU(unsigned char *pdu, const char *message, const char *smsc, const char *sender);
@@ -1886,13 +1886,13 @@ static void smsIncomingMessage(DBusGProxy *proxy, const gchar *message,
     // TODO: more accurate guess about buffer length
     unsigned char *pdu = malloc(240 + strlen(message)*4);
 
-    LOGD("smsIncomingMessage: %s", message);
+    ALOGD("smsIncomingMessage: %s", message);
     g_hash_table_foreach(dict, (GHFunc)hash_entry_gvalue_print, NULL);
     GValue *sender = g_hash_table_lookup(dict, "Sender");
 
     if (sender) {
         if (encodePDU(pdu, message, "+79168999100", g_value_peek_pointer(sender))) {
-            LOGD("PDU: %s", pdu);
+            ALOGD("PDU: %s", pdu);
             RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_NEW_SMS, pdu, sizeof(char*));
         }
         g_value_unset(sender);
@@ -1905,7 +1905,7 @@ static void connman_property_changed(DBusGProxy *proxy, const gchar *property,
                                      GValue *value, gpointer user_data)
 {
     // XXX
-    LOGW("connman_property_changed %s->%s", property, g_strdup_value_contents(value));
+    ALOGW("connman_property_changed %s->%s", property, g_strdup_value_contents(value));
 
     if (!g_strcmp0(property, "Attached")) {
         connmanAttached = g_value_get_boolean(value);
@@ -1920,7 +1920,7 @@ static void pdc_property_changed(DBusGProxy *proxy, const gchar *property,
                                  GValue *value, gpointer user_data)
 {
     // XXX
-    LOGW("pcd_property_changed %s->%s", property, g_strdup_value_contents(value));
+    ALOGW("pcd_property_changed %s->%s", property, g_strdup_value_contents(value));
     if (!g_strcmp0(property, "Active")) {
         pdcActive = g_value_get_boolean(value);
         if (pdcActive) {
@@ -1934,7 +1934,7 @@ static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
                                   GValue *value, gpointer user_data)
 {
     if (!g_strcmp0(property, "Strength")) {
-        //LOGD("Strength: %u, screenState=%d", g_value_get_uint(value), screenState);
+        //ALOGD("Strength: %u, screenState=%d", g_value_get_uint(value), screenState);
         if (screenState) {
             netregStrength = (unsigned int)g_value_get_uchar(value);
             requestSignalStrength(0, 0, 0);
@@ -2008,7 +2008,7 @@ static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
     }
 
     gchar *valStr = g_strdup_value_contents(value);
-    LOGW("netreg_property_changed %s->%s", property, valStr);
+    ALOGW("netreg_property_changed %s->%s", property, valStr);
     g_free(valStr);
     sendNetworkStateChanged();
     g_value_unset(value);
@@ -2017,7 +2017,7 @@ static void netregPropertyChanged(DBusGProxy *proxy, const gchar *property,
 static void radiosettingsPropertyChanged(DBusGProxy *proxy, const gchar *property,
                                          GValue *value, gpointer user_data)
 {
-    LOGD("RadioSettings property changed %s",property); 
+    ALOGD("RadioSettings property changed %s",property); 
 }
 
 static void initVoiceCallInterfaces()
@@ -2051,7 +2051,7 @@ static void initVoiceCallInterfaces()
                                     G_CALLBACK(vcmCallRemoved), vcm, NULL);
     }
     else
-        LOGE("Failed to create VCM proxy object");
+        ALOGE("Failed to create VCM proxy object");
 }
 
 static void initSimInterface()
@@ -2063,12 +2063,12 @@ static void initSimInterface()
         dbus_g_proxy_connect_signal(sim,
                                     OFONO_SIGNAL_PROPERTY_CHANGED,
                                     G_CALLBACK(sim_property_changed), sim, NULL);
-        LOGW("Sim proxy created");
+        ALOGW("Sim proxy created");
 
 #if 0
         GHashTable *dict = iface_get_properties(sim);
         if (!dict) {
-            LOGE("SimManager.GetProperties failed");
+            ALOGE("SimManager.GetProperties failed");
             return;
         }
         g_hash_table_foreach(dict, (GHFunc)hash_entry_gvalue_print, NULL);
@@ -2079,19 +2079,19 @@ static void initSimInterface()
             strncpy(simIMSI, g_value_peek_pointer(value), sizeof(simIMSI));
         }
         else {
-            LOGE("No SubscriberIdentity! SIM is locked?");
+            ALOGE("No SubscriberIdentity! SIM is locked?");
         }
 
         g_hash_table_destroy(dict);
 #endif
     }
     else
-        LOGE("Failed to create SIM proxy object");
+        ALOGE("Failed to create SIM proxy object");
 }
 
 static void initConnManager()
 {
-    LOGD("initConnManager");
+    ALOGD("initConnManager");
     // DataConnectionManager
     connman = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_CONNMAN);
     if (connman) {
@@ -2100,10 +2100,10 @@ static void initConnManager()
         dbus_g_proxy_connect_signal(connman,
                                     OFONO_SIGNAL_PROPERTY_CHANGED,
                                     G_CALLBACK(connman_property_changed), connman, NULL);
-        LOGW("DataConnectionManager proxy created");
+        ALOGW("DataConnectionManager proxy created");
     }
     else {
-        LOGE("Failed to create DataConnectionManager proxy object");
+        ALOGE("Failed to create DataConnectionManager proxy object");
         return;
     }
 
@@ -2117,7 +2117,7 @@ static void initConnManager()
     }
 
     // find existing context
-    LOGD("Trying to find existing context");
+    ALOGD("Trying to find existing context");
     char *pdcPath = NULL;
     GPtrArray *arrContexts = 0;
     GError *error = NULL;
@@ -2125,28 +2125,28 @@ static void initConnManager()
                            type_a_oa_sv, &arrContexts,
                            G_TYPE_INVALID))
     {
-        LOGE("initConnManager: GetContexts error: %s", error->message);
-        LOGW("New context will be created");
+        ALOGE("initConnManager: GetContexts error: %s", error->message);
+        ALOGW("New context will be created");
     }
 
     // we'll use first found context
     if (arrContexts && arrContexts->len) {
         GValueArray *ctx = g_ptr_array_index(arrContexts, 0);
         pdcPath = g_strdup(g_value_get_boxed(g_value_array_get_nth(ctx, 0)));
-        LOGD("existing pdcPath: %s", pdcPath);
+        ALOGD("existing pdcPath: %s", pdcPath);
     }
 
     if (!pdcPath) {
         // create new context if nothing found
         GError *error = NULL;
-        LOGD("ConnMan.CreateContext preparing for crash...");
+        ALOGD("ConnMan.CreateContext preparing for crash...");
         if ( !dbus_g_proxy_call(connman, "AddContext", &error,
                                 G_TYPE_STRING, "internet",
                                 G_TYPE_STRING, "internet",
                                 G_TYPE_INVALID,
                                 DBUS_TYPE_G_PROXY, &pdc, G_TYPE_INVALID) )
         {
-            LOGE("ConnMan.CreateContext failed: %s", error->message);
+            ALOGE("ConnMan.CreateContext failed: %s", error->message);
             g_error_free (error);
             return;
         }
@@ -2154,7 +2154,7 @@ static void initConnManager()
     }
     else {
         // create org.ofono.PrimaryDataContext proxy
-        LOGD("pdcPath: %s", pdcPath);
+        ALOGD("pdcPath: %s", pdcPath);
         pdc = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, pdcPath, OFONO_IFACE_PDC);
         g_free(pdcPath);
     }
@@ -2165,27 +2165,27 @@ static void initConnManager()
         dbus_g_proxy_connect_signal(pdc,
                                     OFONO_SIGNAL_PROPERTY_CHANGED,
                                     G_CALLBACK(pdc_property_changed), pdc, NULL);
-        LOGW("PrimaryDataContext proxy created");
+        ALOGW("PrimaryDataContext proxy created");
     }
     else
-        LOGE("Failed to create PrimaryDataContext proxy object");
+        ALOGE("Failed to create PrimaryDataContext proxy object");
 }
 
 static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                                    GValue *value, gpointer user_data)
 {
     // XXX
-    LOGD("modem_property_changed: %s->%s", property, g_strdup_value_contents(value));
+    ALOGD("modem_property_changed: %s->%s", property, g_strdup_value_contents(value));
 
     if (!vcm && g_strcmp0(property, "Online") == 0) {
-        LOGD("Modem->Onlne: %s", g_value_get_boolean(value) ? "true" : "false");
+        ALOGD("Modem->Onlne: %s", g_value_get_boolean(value) ? "true" : "false");
         //TODO: what?
     }
     else if (g_strcmp0(property, "Interfaces") == 0) {
         const gchar **ifArr = g_value_peek_pointer(value);
-        LOGD("Interfaces:");
+        ALOGD("Interfaces:");
         while(*ifArr) {
-            LOGD("  >> %s", *ifArr);
+            ALOGD("  >> %s", *ifArr);
             if (!vcm && !g_strcmp0(*ifArr, OFONO_IFACE_CALLMAN)) {
                 initVoiceCallInterfaces();
             }
@@ -2200,10 +2200,10 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                     dbus_g_proxy_connect_signal(netreg,
                                                 OFONO_SIGNAL_PROPERTY_CHANGED,
                                                 G_CALLBACK(netregPropertyChanged), netreg, NULL);
-                    LOGW("NetReg proxy created");
+                    ALOGW("NetReg proxy created");
                 }
                 else
-                    LOGE("Failed to create NetReg proxy object");
+                    ALOGE("Failed to create NetReg proxy object");
             }
             else if (!radiosettings && !g_strcmp0(*ifArr, OFONO_IFACE_RADIOSETTINGS)) {
                 radiosettings = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_RADIOSETTINGS);
@@ -2213,10 +2213,10 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                     dbus_g_proxy_connect_signal(radiosettings,
                                                 OFONO_SIGNAL_PROPERTY_CHANGED,
                                                 G_CALLBACK(radiosettingsPropertyChanged), radiosettings, NULL);
-                    LOGW("NetReg proxy created");
+                    ALOGW("NetReg proxy created");
                 }
                 else
-                    LOGE("Failed to create NetReg proxy object");
+                    ALOGE("Failed to create NetReg proxy object");
             }
             else if (!sms && !g_strcmp0(*ifArr, OFONO_IFACE_SMSMAN)) {
                 sms = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_SMSMAN);
@@ -2240,10 +2240,10 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                                             G_TYPE_INVALID);
                     dbus_g_proxy_connect_signal(sms, OFONO_SIGNAL_INCOMING_MESSAGE,
                                                 G_CALLBACK(smsIncomingMessage), sms, 0);
-                    LOGW("SmsManager proxy created");
+                    ALOGW("SmsManager proxy created");
                 }
                 else
-                    LOGE("Failed to create SmsMan proxy object");
+                    ALOGE("Failed to create SmsMan proxy object");
             }
             else if (!supsrv && !g_strcmp0(*ifArr, OFONO_IFACE_SUPSRV)) {
                 supsrv = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_SUPSRV);
@@ -2259,10 +2259,10 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                     dbus_g_proxy_connect_signal(supsrv, OFONO_SIGNAL_REQUEST_RECEIVED,
                                                 G_CALLBACK(supsrvRequestReceived), supsrv, 0);
 
-                    LOGW("SupplementaryServices proxy created");
+                    ALOGW("SupplementaryServices proxy created");
                 }
                 else
-                    LOGE("Failed to create SupplementaryServices proxy object");
+                    ALOGE("Failed to create SupplementaryServices proxy object");
             }
             else if (!audioSettings && !g_strcmp0(*ifArr, OFONO_IFACE_AUDIOSETTINGS)) {
                 audioSettings = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, OFONO_IFACE_AUDIOSETTINGS);
@@ -2272,10 +2272,10 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
                     dbus_g_proxy_connect_signal(audioSettings,
                                                 OFONO_SIGNAL_PROPERTY_CHANGED,
                                                 G_CALLBACK(audioSettingsPropertyChanged), audioSettings, NULL);
-                    LOGW("AudioSettings proxy created");
+                    ALOGW("AudioSettings proxy created");
                 }
                 else
-                    LOGE("Failed to create AudioSettings proxy object");
+                    ALOGE("Failed to create AudioSettings proxy object");
             }
             else if (!connman && !g_strcmp0(*ifArr, OFONO_IFACE_CONNMAN)) {
                 initConnManager();
@@ -2308,9 +2308,9 @@ static void modem_property_changed(DBusGProxy *proxy, const gchar *property,
     else if (g_strcmp0(property, "Features") == 0) {
         const gchar **fArr = g_value_peek_pointer(value);
         while(*fArr) {
-            LOGD("  >> %s", *fArr);
+            ALOGD("  >> %s", *fArr);
             if (!goingOnline && g_strcmp0(*fArr, "rat") == 0) {
-                LOGW("rat available, going online");
+                ALOGW("rat available, going online");
                 GValue value = G_VALUE_INITIALIZATOR;
                 g_value_init(&value, G_TYPE_BOOLEAN);
                 g_value_set_boolean(&value, TRUE);
@@ -2337,38 +2337,38 @@ static int initOfono()
     GError *error = NULL;
     connection = dbus_g_bus_get(DBUS_BUS_SYSTEM, &error);
     if (!connection) {
-        LOGE("Failed to open connection to bus: %s\n", error->message);
+        ALOGE("Failed to open connection to bus: %s\n", error->message);
         g_error_free (error);
         return 0;
     }
-    LOGW("dbus connect - ok");
+    ALOGW("dbus connect - ok");
 
     error = NULL;
     manager = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, "/", "org.ofono.Manager");
     if (!manager) {
-        LOGE("Failed to create Manager proxy object: %s", error->message);
+        ALOGE("Failed to create Manager proxy object: %s", error->message);
         return 0;
     }
-    LOGD("proxy manager - ok");
+    ALOGD("proxy manager - ok");
 
     GPtrArray *modems = 0;
     if (!dbus_g_proxy_call(manager, "GetModems", &error, G_TYPE_INVALID,
                            type_a_oa_sv, &modems,
                            G_TYPE_INVALID))
     {
-        LOGE(".GetModems failed: %s", error->message);
+        ALOGE(".GetModems failed: %s", error->message);
         return 0;
     }
 
     if (!modems || !modems->len) {
-        LOGE("modems->len is empty. Probably, modem isn't detected yet.");
+        ALOGE("modems->len is empty. Probably, modem isn't detected yet.");
         return 0;
     }
 
     GValueArray *mdm = g_ptr_array_index(modems, 0);
     const char *modemPath = g_value_get_boxed(g_value_array_get_nth(mdm, 0));
     if (g_strcmp0(MODEM, modemPath) != 0) {
-        LOGE("Modem path dosn't match: \"%s\", but we expect \"%s\"", modemPath, MODEM);
+        ALOGE("Modem path dosn't match: \"%s\", but we expect \"%s\"", modemPath, MODEM);
         return 0;
     }
     g_ptr_array_free(modems, TRUE);
@@ -2376,16 +2376,16 @@ static int initOfono()
     error = NULL;
     modem = dbus_g_proxy_new_for_name(connection, OFONO_SERVICE, MODEM, "org.ofono.Modem");
     if (!modem) {
-        LOGE("Failed to create Modem proxy object: %s", error->message);
+        ALOGE("Failed to create Modem proxy object: %s", error->message);
         return 0;
     }
     dbus_g_proxy_add_signal(modem, OFONO_SIGNAL_PROPERTY_CHANGED, G_TYPE_STRING, G_TYPE_VALUE, G_TYPE_INVALID);
     dbus_g_proxy_connect_signal(modem,
                                 OFONO_SIGNAL_PROPERTY_CHANGED,
                                 G_CALLBACK(modem_property_changed), modem, NULL);
-    LOGW("modem proxy - ok");
+    ALOGW("modem proxy - ok");
 
-    LOGW("Ofono initialization - ok");
+    ALOGW("Ofono initialization - ok");
     return 0;
 }
 

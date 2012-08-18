@@ -1608,7 +1608,7 @@ static int getCardStatus(RIL_CardStatus_v6 **pp_card_status) {
         p_card_status->gsm_umts_subscription_app_index = 0;
 
         // Get the correct app status
-        p_card_status->applications[0] = app_status_array[sim_status];
+        p_card_status->applications[0] = app_status_array[SIM_READY];
     }
 
     *pp_card_status = p_card_status;

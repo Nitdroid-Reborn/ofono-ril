@@ -28,8 +28,7 @@ LOCAL_SRC_FILES:= \
 LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/.. \
 	$(KERNEL_HEADERS) \
-	$(call include-path-for, glib) \
-	$(call include-path-for, dbus) \
+	external/dbus \
 	external/glib/glib \
 	external/glib \
 	external/glib/android \

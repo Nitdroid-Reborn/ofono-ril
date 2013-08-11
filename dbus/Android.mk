@@ -20,7 +20,7 @@ LOCAL_CFLAGS+=-O3
 
 LOCAL_C_INCLUDES:= \
 	$(LOCAL_PATH)/.. \
-	$(call include-path-for, dbus) \
+	external/dbus \
 	external/glib/glib \
 	external/glib \
 	external/glib/android \

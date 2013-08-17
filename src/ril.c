@@ -1188,7 +1188,8 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
      * when RADIO_STATE_UNAVAILABLE.
      */
     if (sState == RADIO_STATE_UNAVAILABLE
-        && request != RIL_REQUEST_GET_SIM_STATUS
+        && !(RIL_REQUEST_GET_SIM_STATUS == request
+             || RIL_REQUEST_GET_IMSI == request)
         ) {
         RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
         return;
@@ -1202,7 +1203,8 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
              || request == RIL_REQUEST_GET_SIM_STATUS
              || request == RIL_REQUEST_GET_IMEI
              || request == RIL_REQUEST_GET_IMEISV
-             || request == RIL_REQUEST_BASEBAND_VERSION)
+             || request == RIL_REQUEST_BASEBAND_VERSION
+             || request == RIL_REQUEST_GET_IMSI)
         ) {
         RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
         return;
@@ -1591,7 +1593,8 @@ static int getCardStatus(RIL_CardStatus_v6 **pp_card_status) {
     p_card_status->card_state = card_state;
     p_card_status->universal_pin_state = RIL_PINSTATE_UNKNOWN;
     p_card_status->gsm_umts_subscription_app_index = RIL_CARD_MAX_APPS;
-    p_card_status->cdma_subscription_app_index = RIL_CARD_MAX_APPS;
+    p_card_status->cdma_subscription_app_index = -1;
+    p_card_status->ims_subscription_app_index = -1;
     p_card_status->num_applications = num_apps;
 
     // Initialize application status
@@ -1919,8 +1922,7 @@ static void connman_property_changed(DBusGProxy *proxy, const gchar *property,
 static void pdc_property_changed(DBusGProxy *proxy, const gchar *property,
                                  GValue *value, gpointer user_data)
 {
-    // XXX
-    ALOGW("pcd_property_changed %s->%s", property, g_strdup_value_contents(value));
+    ALOGD("pdc_property_changed %s->%s", property, g_value_peek_pointer(value));
     if (!g_strcmp0(property, "Active")) {
         pdcActive = g_value_get_boolean(value);
         if (pdcActive) {
